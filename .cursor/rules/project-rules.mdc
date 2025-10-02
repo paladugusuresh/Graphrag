@@ -1,0 +1,19 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+
+1. Run one TASK prompt at a time. After each commit, run tests locally (or via Cursor) before moving to next task.
+2. Use the repository's config.yaml for timeout and guardrail values. Do not hardcode sensitive values.
+3. When modifying code paths that accept LLM outputs, always:
+   a) Create/extend a Pydantic model for expected JSON.
+   b) Use llm_client.call_llm_structured(..., schema_model).
+   c) If validation fails, call audit_store.record and raise an error; do NOT proceed.
+4. For Redis rate limiting, prefer Lua atomic script. If not possible, use a simple per-minute key but mark TODO to replace with atomic script.
+5. For any new Cypher templates added to CYPHER_TEMPLATES, add unit tests verifying the templates' labels are present in allow_list.json.
+6. For any changes that could return PII or sensitive data, mask before writing to audit logs.
+7. If a task requires human policy decision (schema change, adding a new label to allow_list), create `docs/schema_change_request.md` and stop; do not auto-edit allow_list.json.
+
+REPORTING
+- After each task commit, return a one-line message: "TASK nn: <commit-message> — PASS" or "... — FAIL (explain)"

@@ -1,0 +1,110 @@
+# graph_rag/llm_client.py
+import os
+import time
+import json
+import yaml
+import redis
+from pydantic import BaseModel, ValidationError
+from graph_rag.observability import get_logger, tracer, llm_calls_total
+from graph_rag.audit_store import audit_store
+
+logger = get_logger(__name__)
+with open("config.yaml", 'r') as f:
+    CFG = yaml.safe_load(f)
+
+REDIS_URL = CFG['llm'].get('redis_url', os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+
+# Internal variable to store the Redis client instance
+_redis_client_instance = None
+
+def _get_redis_client():
+    global _redis_client_instance
+    if _redis_client_instance is None:
+        _redis_client_instance = redis.from_url(REDIS_URL, decode_responses=True)
+    return _redis_client_instance
+
+RATE_LIMIT_KEY = "graphrag:llm:tokens"
+RATE_LIMIT_PER_MINUTE = CFG['llm'].get('rate_limit_per_minute', 60)
+
+# Lua script for atomic token consumption
+# KEYS[1] - rate limit key
+# ARGV[1] - tokens to consume
+# ARGV[2] - rate limit per minute
+# ARGV[3] - current timestamp (integer seconds)
+RATE_LIMIT_LUA_SCRIPT = """
+    local key = KEYS[1]
+    local tokens_to_consume = tonumber(ARGV[1])
+    local rate_limit_per_minute = tonumber(ARGV[2])
+    local current_time = tonumber(ARGV[3])
+
+    local window = math.floor(current_time / 60)
+    local window_key = key .. ":" .. window
+
+    local current_tokens = tonumber(redis.call('get', window_key) or rate_limit_per_minute)
+
+    if current_tokens - tokens_to_consume >= 0 then
+        redis.call('decrby', window_key, tokens_to_consume)
+        -- Set expiry to the end of the current window + a buffer (e.g., 60 seconds)
+        redis.call('expire', window_key, (window + 1) * 60 - current_time + 60)
+        return 1
+    else
+        return 0
+    end
+"""
+
+def consume_token(key=RATE_LIMIT_KEY, tokens=1) -> bool:
+    """
+    Consumes tokens from a Redis-backed token bucket using a Lua script for atomicity.
+    Returns True if tokens were consumed, False otherwise.
+    """
+    now = int(time.time())
+    redis_client = _get_redis_client()
+    result = redis_client.eval(RATE_LIMIT_LUA_SCRIPT, 1, key, tokens, RATE_LIMIT_PER_MINUTE, now)
+    return result == 1
+
+class LLMStructuredError(Exception):
+    pass
+
+def call_llm_raw(prompt: str, model: str, max_tokens: int = 512) -> str:
+    """
+    Placeholder raw LLM caller. Integrate OpenAI/other in prod.
+    Must be wrapped by call_llm_structured() which validates outputs.
+    """
+    llm_calls_total.inc()
+    # TODO: integrate real provider
+    # For now return a JSON-like string or plain text (for dev)
+    return '{"intent":"general_rag_query","anchor":null}'
+
+def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None, max_tokens: int = None):
+    """
+    Calls LLM and validates JSON output against schema_model (a Pydantic model class).
+    Returns validated object instance or raises LLMStructuredError.
+    """
+    if not consume_token():
+        raise LLMStructuredError("LLM rate limit exceeded")
+
+    model = model or CFG['llm']['model']
+    max_tokens = max_tokens or CFG['llm']['max_tokens']
+    response = call_llm_raw(prompt, model=model, max_tokens=max_tokens)
+
+    # Try to parse JSON safely
+    try:
+        parsed = json.loads(response)
+    except Exception:
+        # attempt to extract JSON substring
+        try:
+            start = response.find("{")
+            end = response.rfind("}") + 1
+            parsed = json.loads(response[start:end])
+        except Exception as e:
+            logger.error(f"LLM returned non-JSON and extraction failed: {response}")
+            audit_store.record(prompt=prompt, response=response, error=str(e), tags=["llm_parse_failure", "human_review"])
+            raise LLMStructuredError("Invalid JSON from LLM") from e
+
+    try:
+        validated = schema_model.model_validate(parsed) # Use model_validate for Pydantic v2+
+        return validated
+    except ValidationError as e:
+        logger.warning(f"LLM output failed validation: {e}")
+        audit_store.record(prompt=prompt, response=response, error=str(e), tags=["llm_validation_failure", "human_review"])
+        raise LLMStructuredError("Structured output failed validation") from e

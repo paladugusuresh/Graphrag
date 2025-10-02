@@ -1,0 +1,19 @@
+{
+  "node_labels": [
+    "Document",
+    "Chunk",
+    "Entity",
+    "__Entity__",
+    "Person",
+    "Organization",
+    "Product"
+  ],
+  "relationship_types": [
+    "PART_OF",
+    "HAS_CHUNK",
+    "MENTIONS",
+    "FOUNDED",
+    "HAS_PRODUCT"
+  ],
+  "properties": {}
+}
