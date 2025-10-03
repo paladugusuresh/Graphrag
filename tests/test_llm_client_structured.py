@@ -46,10 +46,13 @@ class TestLLMClientStructured(unittest.TestCase):
         
         self.assertIn("Invalid JSON from LLM", str(cm.exception))
         mock_audit_store.record.assert_called_once_with(
-            prompt="test prompt",
-            response="this is not json",
-            error=unittest.mock.ANY, # The actual error message might vary
-            tags=["llm_parse_failure", "human_review"]
+            entry={
+                "type": "llm_parse_failure",
+                "prompt": "test prompt",
+                "response": "this is not json",
+                "error": unittest.mock.ANY,
+                "trace_id": unittest.mock.ANY # trace_id can be None in this test context
+            }
         )
 
     @patch("graph_rag.llm_client.redis_client")
@@ -78,10 +81,13 @@ class TestLLMClientStructured(unittest.TestCase):
         
         self.assertIn("Structured output failed validation", str(cm.exception))
         mock_audit_store.record.assert_called_once_with(
-            prompt="test prompt",
-            response=json.dumps({"field_a": "value", "field_c": 123}),
-            error=unittest.mock.ANY,
-            tags=["llm_validation_failure", "human_review"]
+            entry={
+                "type": "llm_validation_failed",
+                "prompt": "test prompt",
+                "response": json.dumps({"field_a": "value", "field_c": 123}),
+                "error": unittest.mock.ANY,
+                "trace_id": unittest.mock.ANY # trace_id can be None in this test context
+            }
         )
 
     @patch("graph_rag.llm_client.redis_client")

@@ -98,7 +98,7 @@ def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None,
             parsed = json.loads(response[start:end])
         except Exception as e:
             logger.error(f"LLM returned non-JSON and extraction failed: {response}")
-            audit_store.record(prompt=prompt, response=response, error=str(e), tags=["llm_parse_failure", "human_review"])
+            audit_store.record(entry={"type":"llm_parse_failure", "prompt": prompt, "response":response, "error":str(e), "trace_id": str(tracer.get_current_span().context.trace_id) if tracer.get_current_span() else None})
             raise LLMStructuredError("Invalid JSON from LLM") from e
 
     try:
@@ -106,5 +106,5 @@ def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None,
         return validated
     except ValidationError as e:
         logger.warning(f"LLM output failed validation: {e}")
-        audit_store.record(prompt=prompt, response=response, error=str(e), tags=["llm_validation_failure", "human_review"])
+        audit_store.record(entry={"type":"llm_validation_failed", "prompt": prompt, "response":response, "error":str(e), "trace_id": str(tracer.get_current_span().context.trace_id) if tracer.get_current_span() else None})
         raise LLMStructuredError("Structured output failed validation") from e
