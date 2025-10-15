@@ -1,17 +1,16 @@
 # graph_rag/retriever.py
-import yaml
 from graph_rag.observability import get_logger, tracer
 from graph_rag.neo4j_client import Neo4jClient # Import the class, not the instance
 from graph_rag.embeddings import get_embedding_provider # Import the getter function
 from graph_rag.cypher_generator import CypherGenerator # Import the class, not the instance
+from graph_rag.config_manager import get_config_value
 
 logger = get_logger(__name__)
-with open("config.yaml", 'r') as f:
-    CFG = yaml.safe_load(f)
 
 class Retriever:
     def __init__(self, max_chunks: int = None):
-        self.max_chunks = max_chunks or CFG['retriever']['max_chunks']
+        """Initialize Retriever with Neo4j client and embedding provider"""
+        self.max_chunks = max_chunks or get_config_value('retriever.max_chunks', 5)
         self.neo4j_client = Neo4jClient()
         self.embedding_provider = get_embedding_provider()
         self.cypher_generator = CypherGenerator()
@@ -23,7 +22,7 @@ class Retriever:
             cypher, params = self.cypher_generator.CYPHER_TEMPLATES.get(plan.intent, {}).get("cypher"), {"anchor": plan.anchor_entity}
             if not cypher:
                 return ""
-            result = self.neo4j_client.execute_read_query(cypher, params=params, timeout=CFG['guardrails']['neo4j_timeout'])
+            result = self.neo4j_client.execute_read_query(cypher, params=params, timeout=get_config_value('guardrails.neo4j_timeout', 10))
             return "\n".join([list(r.values())[0] for r in result])
 
     def _get_unstructured_context(self, question):
@@ -36,7 +35,7 @@ class Retriever:
             YIELD node
             RETURN node.id AS chunk_id
             """
-            rows = self.neo4j_client.execute_read_query(q, {"top_k": self.max_chunks, "embedding": emb}, timeout=CFG['guardrails']['neo4j_timeout'])
+            rows = self.neo4j_client.execute_read_query(q, {"top_k": self.max_chunks, "embedding": emb}, timeout=get_config_value('guardrails.neo4j_timeout', 10))
             return [r['chunk_id'] for r in rows]
 
     def _expand_with_hierarchy(self, chunk_ids):
@@ -55,7 +54,7 @@ class Retriever:
             RETURN DISTINCT related_chunk.id AS id, related_chunk.text AS text
             LIMIT $max_chunks
             """
-            rows = self.neo4j_client.execute_read_query(q, {"chunk_ids": chunk_ids, "max_hops": CFG['guardrails']['max_traversal_depth'], "max_chunks": self.max_chunks}, timeout=CFG['guardrails']['neo4j_timeout'])
+            rows = self.neo4j_client.execute_read_query(q, {"chunk_ids": chunk_ids, "max_hops": get_config_value('guardrails.max_traversal_depth', 2), "max_chunks": self.max_chunks}, timeout=get_config_value('guardrails.neo4j_timeout', 10))
             return rows
 
     def retrieve_context(self, plan):
