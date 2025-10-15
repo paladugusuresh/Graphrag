@@ -1,15 +1,13 @@
 # graph_rag/planner.py
-import yaml
 from pydantic import BaseModel, Field
 from graph_rag.observability import get_logger, tracer
 from graph_rag.llm_client import call_llm_structured, LLMStructuredError
 from graph_rag.cypher_generator import CypherGenerator
 from graph_rag.neo4j_client import Neo4jClient
 from graph_rag.embeddings import get_embedding_provider
+from graph_rag.config_manager import get_config, get_config_value
 
 logger = get_logger(__name__)
-with open("config.yaml", 'r') as f:
-    CFG = yaml.safe_load(f)
 
 class ExtractedEntities(BaseModel):
     names: list[str] = Field(...)
@@ -237,8 +235,8 @@ Respond with your classification:"""
 
     try:
         # Use planner-specific model from config
-        planner_model = CFG.get('llm', {}).get('planner_model', CFG['llm']['model'])
-        planner_max_tokens = CFG.get('llm', {}).get('planner_max_tokens', 256)
+        planner_model = get_config_value('llm.planner_model') or get_config_value('llm.model', 'gpt-4o')
+        planner_max_tokens = get_config_value('llm.planner_max_tokens', 256)
         
         planner_output = call_llm_structured(
             prompt=prompt,
