@@ -1,6 +1,8 @@
 # graph_rag/rag.py
+import os
 import re
 import json
+from typing import Optional
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from graph_rag.planner import generate_plan
@@ -13,8 +15,33 @@ logger = get_logger(__name__)
 
 class RAGChain:
     def __init__(self):
-        self.llm = ChatOpenAI(temperature=0, model_name="gpt-4o")
+        """Initialize RAG chain with lazy LLM instantiation"""
+        self._llm: Optional[ChatOpenAI] = None
         self.retriever = Retriever() # Instantiate Retriever locally
+    
+    @property
+    def llm(self) -> ChatOpenAI:
+        """Lazy initialization of LLM"""
+        if self._llm is None:
+            # Check if we're in DEV_MODE or missing API key
+            dev_mode = os.getenv("DEV_MODE", "").lower() in ("true", "1", "yes")
+            api_key = os.getenv("OPENAI_API_KEY")
+            
+            if not api_key and not dev_mode:
+                raise RuntimeError("OPENAI_API_KEY not set and not in DEV_MODE")
+            elif not api_key and dev_mode:
+                logger.warning("DEV_MODE: Creating ChatOpenAI with placeholder - LLM calls will fail but imports succeed")
+                # Create a placeholder that won't be used in tests
+                try:
+                    self._llm = ChatOpenAI(temperature=0, model_name="gpt-4o", api_key="dev-mode-placeholder")
+                except Exception as e:
+                    logger.warning(f"Could not create ChatOpenAI in DEV_MODE: {e}")
+                    # Return None and let tests mock it
+                    return None
+            else:
+                self._llm = ChatOpenAI(temperature=0, model_name="gpt-4o")
+        
+        return self._llm
 
     def _verify_citations(self, answer, provided_chunk_ids, question, trace_id):
         cited = set(re.findall(r'\[([^\]]+)\]', answer))
