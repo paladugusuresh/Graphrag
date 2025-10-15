@@ -1,6 +1,5 @@
 # main.py
 import os
-import yaml
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from graph_rag.rag import rag_chain
@@ -9,18 +8,18 @@ from graph_rag.conversation_store import conversation_store
 from graph_rag.sanitizer import sanitize_text, is_probably_malicious
 from graph_rag.audit_store import audit_store
 from graph_rag.guardrail import guardrail_check
+from graph_rag.config_manager import get_config_value
 import uuid
-
-with open("config.yaml", 'r') as f:
-    cfg = yaml.safe_load(f)
 
 logger = get_logger(__name__)
 app = FastAPI(title="GraphRAG")
 
 @app.on_event("startup")
 def startup_event():
+    """Initialize services on application startup"""
     conversation_store.init()
-    if cfg.get("observability", {}).get("metrics_enabled", True):
+    # Start metrics server if enabled in config
+    if get_config_value("observability.metrics_enabled", True):
         start_metrics_server()
 
 class ChatRequest(BaseModel):
