@@ -1,20 +1,18 @@
 # graph_rag/cypher_generator.py
 import json
 import re
-import yaml
 from graph_rag.observability import get_logger
+from graph_rag.config_manager import get_config_value
 
 logger = get_logger(__name__)
 
 LABEL_REGEX = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 RELATIONSHIP_TYPE_REGEX = re.compile(r"^[A-Z_][A-Z0-9_]*$") # Cypher relationship types are typically uppercase
 
-with open("config.yaml", 'r') as f:
-    CFG = yaml.safe_load(f)
-
 class CypherGenerator:
     def __init__(self, allow_list_path: str = None):
-        path = allow_list_path or CFG['schema']['allow_list_path']
+        """Initialize CypherGenerator with allow list from file"""
+        path = allow_list_path or get_config_value('schema.allow_list_path', 'allow_list.json')
         try:
             with open(path, 'r') as fh:
                 self.allow_list = json.load(fh)
