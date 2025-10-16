@@ -1,5 +1,6 @@
 # main.py
 import os
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from graph_rag.rag import rag_chain
@@ -12,15 +13,18 @@ from graph_rag.config_manager import get_config_value
 import uuid
 
 logger = get_logger(__name__)
-app = FastAPI(title="GraphRAG")
 
-@app.on_event("startup")
-def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     """Initialize services on application startup"""
     conversation_store.init()
     # Start metrics server if enabled in config
     if get_config_value("observability.metrics_enabled", True):
         start_metrics_server()
+    yield
+    # Cleanup code can go here if needed
+
+app = FastAPI(title="GraphRAG", lifespan=lifespan)
 
 class ChatRequest(BaseModel):
     conversation_id: str | None = None

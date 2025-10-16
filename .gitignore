@@ -1,0 +1,85 @@
+# Project-specific dump and export files
+project_full_dump.py
+*_dump.py
+generate_dump.py
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.virtualenv/
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+.tox/
+htmlcov/
+*.cover
+.hypothesis/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# Environment variables (keep .env.example)
+.env
+.env.local
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+logs/
+tmp/
+
+# Large data exports and checkpoints
+data/exports/
+data/dumps/
+*.checkpoint
+*.ckpt
+*.pkl
+*.pickle
+
+# Build and distribution
+build/
+dist/
+*.egg-info/
+*.egg
+
+# mypy type checker
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyright type checker
+.pyright/
+
+# Documentation builds
+docs/_build/
+site/
+
+# Database files (exclude local DB files, keep schema)
+*.db
+*.sqlite
+*.sqlite3
+!database/schema.cypher
+
+# OS-specific
+Thumbs.db
+.Trash-*
+

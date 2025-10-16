@@ -1,11 +1,11 @@
 # graph_rag/schema_embeddings.py
 import json
 import os
-import yaml
 from typing import List, Dict, Any
 from graph_rag.observability import get_logger
 from graph_rag.embeddings import get_embedding_provider
 from graph_rag.neo4j_client import Neo4jClient
+from graph_rag.config_manager import get_config, get_config_value
 
 logger = get_logger(__name__)
 
@@ -17,11 +17,8 @@ def collect_schema_terms() -> List[Dict[str, Any]]:
         List of dicts with schema term information:
         [{"id": "<type>:<term>", "term": "<term>", "type": "label|relationship|property", "canonical_id": "<term>"}]
     """
-    with open("config.yaml", 'r') as f:
-        cfg = yaml.safe_load(f)
-    
-    # Load allow_list.json
-    allow_list_path = cfg['schema']['allow_list_path']
+    # Load configuration at runtime
+    allow_list_path = get_config_value('schema.allow_list_path', 'allow_list.json')
     try:
         with open(allow_list_path, 'r') as f:
             allow_list = json.load(f)
@@ -64,7 +61,7 @@ def collect_schema_terms() -> List[Dict[str, Any]]:
         })
     
     # Load synonyms if available
-    synonyms_path = cfg.get('schema_embeddings', {}).get('include_synonyms_path')
+    synonyms_path = get_config_value('schema_embeddings.include_synonyms_path')
     if synonyms_path and os.path.exists(synonyms_path):
         try:
             with open(synonyms_path, 'r') as f:
@@ -156,13 +153,10 @@ def upsert_schema_embeddings() -> Dict[str, Any]:
     Returns:
         Dict with operation results and statistics
     """
-    with open("config.yaml", 'r') as f:
-        cfg = yaml.safe_load(f)
-    
-    # Get configuration
-    timeout = cfg.get('guardrails', {}).get('neo4j_timeout', 10)
-    index_name = cfg.get('schema_embeddings', {}).get('index_name', 'schema_embeddings')
-    node_label = cfg.get('schema_embeddings', {}).get('node_label', 'SchemaTerm')
+    # Get configuration at runtime
+    timeout = get_config_value('guardrails.neo4j_timeout', 10)
+    index_name = get_config_value('schema_embeddings.index_name', 'schema_embeddings')
+    node_label = get_config_value('schema_embeddings.node_label', 'SchemaTerm')
     
     # Generate schema embeddings
     schema_data = generate_schema_embeddings()

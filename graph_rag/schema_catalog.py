@@ -1,15 +1,15 @@
 # graph_rag/schema_catalog.py
 import json
-import yaml
 from graph_rag.neo4j_client import Neo4jClient
 from graph_rag.observability import get_logger
+from graph_rag.config_manager import get_config_value
+from graph_rag.dev_stubs import get_neo4j_client_or_mock
 
 logger = get_logger(__name__)
 
 def generate_schema_allow_list(output_path: str = None):
-    with open("config.yaml", 'r') as f:
-        cfg = yaml.safe_load(f)
-    output_path = output_path or cfg['schema']['allow_list_path']
+    """Generate schema allow-list from Neo4j database or create stub if unavailable"""
+    output_path = output_path or get_config_value("schema.allow_list_path", "allow_list.json")
 
     try:
         client = Neo4jClient()

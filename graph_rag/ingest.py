@@ -1,6 +1,7 @@
 # graph_rag/ingest.py
 import os
 import glob
+import yaml
 from langchain.docstore.document import Document
 from langchain.text_splitter import TokenTextSplitter
 from graph_rag.neo4j_client import Neo4jClient

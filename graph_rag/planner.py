@@ -114,10 +114,9 @@ def _find_best_anchor_entity_semantic(candidate: str) -> str | None:
             span.set_attribute("candidate_entity", candidate)
             
             # Get configuration
-            schema_embeddings_config = CFG.get('schema_embeddings', {})
-            index_name = schema_embeddings_config.get('index_name', 'schema_embeddings')
-            top_k = schema_embeddings_config.get('top_k', 5)
-            timeout = CFG.get('guardrails', {}).get('neo4j_timeout', 10)
+            index_name = get_config_value('schema_embeddings.index_name', 'schema_embeddings')
+            top_k = get_config_value('schema_embeddings.top_k', 5)
+            timeout = get_config_value('guardrails.neo4j_timeout', 10)
             
             # Compute embedding for candidate
             embedding_provider = get_embedding_provider()
