@@ -1,0 +1,1 @@
+{"type": "guardrail_blocked", "original_question": "Explain the purpose of this system.", "sanitized_question": "Explain the purpose of this system.", "timestamp": "b912227a-4de9-4e2e-b363-c29f416beb50", "action": "blocked_403", "check_type": "llm_guardrail"}

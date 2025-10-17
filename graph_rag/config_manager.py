@@ -87,8 +87,9 @@ class ConfigManager:
                 "metrics_port": 8000
             },
             "llm": {
-                "provider": "openai",
-                "model": "gpt-4o",
+                "provider": "gemini",
+                "model": "gemini-2.0-flash-exp",
+                "embedding_model": "models/text-embedding-004",
                 "max_tokens": 512,
                 "rate_limit_per_minute": 60,
                 "redis_url": "redis://localhost:6379/0"
@@ -96,7 +97,7 @@ class ConfigManager:
             "schema_embeddings": {
                 "index_name": "schema_embeddings",
                 "node_label": "SchemaTerm",
-                "embedding_model": "text-embedding-3-small",
+                "embedding_model": "models/text-embedding-004",
                 "top_k": 5
             }
         }
@@ -111,7 +112,7 @@ class ConfigManager:
         """
         Get config value by dot-separated path.
         Examples:
-            get("llm.model") -> "gpt-4o"
+            get("llm.model") -> "gemini-2.0-flash-exp"
             get("guardrails.neo4j_timeout") -> 10
         """
         config = self.get_config()
@@ -167,9 +168,9 @@ def get_config() -> Dict[str, Any]:
 def get_config_value(key_path: str, default: Any = None) -> Any:
     """
     Get a specific config value by dot-separated path.
-    Examples:
-        get_config_value("llm.model") -> "gpt-4o"
-        get_config_value("missing.key", "default") -> "default"
+        Examples:
+            get_config_value("llm.model") -> "gemini-2.0-flash-exp"
+            get_config_value("missing.key", "default") -> "default"
     """
     global _config_manager
     if _config_manager is None:

@@ -234,7 +234,7 @@ Respond with your classification:"""
 
     try:
         # Use planner-specific model from config
-        planner_model = get_config_value('llm.planner_model') or get_config_value('llm.model', 'gpt-4o')
+        planner_model = get_config_value('llm.planner_model') or get_config_value('llm.model', 'gemini-2.0-flash-exp')
         planner_max_tokens = get_config_value('llm.planner_max_tokens', 256)
         
         planner_output = call_llm_structured(

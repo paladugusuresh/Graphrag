@@ -174,17 +174,17 @@ def should_use_mocks() -> bool:
     Returns True if:
     - DEV_MODE is set
     - SKIP_INTEGRATION is set  
-    - Required secrets are missing (OPENAI_API_KEY, NEO4J_PASSWORD, etc.)
+    - Required secrets are missing (GEMINI_API_KEY, NEO4J_PASSWORD, etc.)
     """
     if is_dev_mode():
         return True
     
     # Check for missing secrets
-    has_openai = bool(os.getenv("OPENAI_API_KEY"))
+    has_gemini = bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
     has_neo4j = bool(os.getenv("NEO4J_PASSWORD") or os.getenv("NEO4J_URI"))
     
     # Use mocks if any critical secret is missing
-    return not (has_openai and has_neo4j)
+    return not (has_gemini and has_neo4j)
 
 
 def get_neo4j_client_or_mock():

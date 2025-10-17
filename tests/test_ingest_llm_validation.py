@@ -16,7 +16,7 @@ class ExtractedGraph(BaseModel):
 
 # Global patches for module-level imports
 @patch("builtins.open", new_callable=mock_open)
-@patch.dict(os.environ, {"NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password", "OPENAI_API_KEY": "mock_openai_key"}, clear=True)
+@patch.dict(os.environ, {"NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password", "GEMINI_API_KEY": "mock_gemini_key"}, clear=True)
 @patch("graph_rag.llm_client._get_redis_client") # Patch the lazy getter function
 @patch("graph_rag.neo4j_client.GraphDatabase")
 @patch("graph_rag.neo4j_client.Neo4jClient") # Patch Neo4jClient in its original module
@@ -56,7 +56,7 @@ class TestIngestLLMValidation(unittest.TestCase):
                     "neo4j_timeout": 10
                 },
                 "llm": {
-                    "model": "gpt-4o",
+                    "model": "gemini-2.0-flash-exp",
                     "max_tokens": 512,
                     "rate_limit_per_minute": 60,
                     "redis_url": "redis://localhost:6379/0"

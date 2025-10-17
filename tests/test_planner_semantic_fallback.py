@@ -31,7 +31,7 @@ class TestPlannerSemanticFallback(unittest.TestCase):
         except ImportError:
             pass
 
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "mock_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"})
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "mock_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"})
     @patch("graph_rag.planner.Neo4jClient")
     @patch("graph_rag.planner.get_embedding_provider")
     @patch("graph_rag.planner.CypherGenerator")
@@ -121,7 +121,7 @@ class TestPlannerSemanticFallback(unittest.TestCase):
         mock_span.set_attribute.assert_any_call("mapped_entity", "Organization")
         mock_span.set_attribute.assert_any_call("similarity_score", 0.95)
 
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "mock_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"})
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "mock_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"})
     @patch("graph_rag.planner.Neo4jClient")
     @patch("graph_rag.planner.get_embedding_provider")
     @patch("graph_rag.planner.CypherGenerator")
@@ -165,7 +165,7 @@ class TestPlannerSemanticFallback(unittest.TestCase):
         mock_embedding_provider.get_embeddings.assert_called_once_with(["UnknownEntity"])
         mock_neo4j_client.execute_read_query.assert_called_once()
 
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "mock_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"})
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "mock_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"})
     @patch("graph_rag.planner.Neo4jClient")
     @patch("graph_rag.planner.get_embedding_provider")
     @patch("graph_rag.planner.CypherGenerator")
@@ -223,7 +223,7 @@ class TestPlannerSemanticFallback(unittest.TestCase):
         # Verify label validation was attempted
         mock_cypher_generator.validate_label.assert_called_once_with("InvalidLabel")
 
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "mock_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"})
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "mock_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"})
     @patch("graph_rag.planner.call_llm_structured")
     @patch("graph_rag.planner._find_best_anchor_entity_semantic")
     @patch("builtins.open", new_callable=mock_open)
@@ -233,8 +233,8 @@ class TestPlannerSemanticFallback(unittest.TestCase):
         # Mock config.yaml
         config_data = """
         llm:
-          model: gpt-4o
-          planner_model: gpt-4o
+          model: gemini-2.0-flash-exp
+          planner_model: gemini-2.0-flash-exp
           planner_max_tokens: 256
         guardrails:
           neo4j_timeout: 10
@@ -271,7 +271,7 @@ class TestPlannerSemanticFallback(unittest.TestCase):
         # Verify LLM was called twice (planner + entity extraction)
         self.assertEqual(mock_call_llm_structured.call_count, 2)
 
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "mock_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"})
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "mock_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"})
     @patch("graph_rag.planner.call_llm_structured")
     @patch("graph_rag.planner._find_best_anchor_entity_semantic")
     @patch("builtins.open", new_callable=mock_open)
@@ -281,8 +281,8 @@ class TestPlannerSemanticFallback(unittest.TestCase):
         # Mock config.yaml
         config_data = """
         llm:
-          model: gpt-4o
-          planner_model: gpt-4o
+          model: gemini-2.0-flash-exp
+          planner_model: gemini-2.0-flash-exp
           planner_max_tokens: 256
         guardrails:
           neo4j_timeout: 10

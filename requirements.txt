@@ -2,8 +2,7 @@ fastapi
 uvicorn[standard]
 neo4j
 python-dotenv
-langchain-openai
-langchain
+google-generativeai
 opentelemetry-api
 opentelemetry-sdk
 opentelemetry-exporter-otlp-proto-http

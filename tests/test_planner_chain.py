@@ -113,7 +113,7 @@ class TestPlannerChain(unittest.TestCase):
         self.assertEqual(len(result), 0)
 
     @patch("builtins.open", new_callable=mock_open)
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "mock_openai_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"}, clear=True)
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "mock_gemini_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"}, clear=True)
     @patch("graph_rag.llm_client._get_redis_client")
     @patch("graph_rag.llm_client.call_llm_structured")
     @patch("graph_rag.llm_client.consume_token")
@@ -126,11 +126,11 @@ class TestPlannerChain(unittest.TestCase):
             mock_open(read_data=json.dumps({
                 "schema": {"allow_list_path": "allow_list.json"},
                 "llm": {
-                    "model": "gpt-4o",
+                    "model": "gemini-2.0-flash-exp",
                     "max_tokens": 512,
                     "rate_limit_per_minute": 60,
                     "redis_url": "redis://localhost:6379/0",
-                    "planner_model": "gpt-4o",
+                    "planner_model": "gemini-2.0-flash-exp",
                     "planner_max_tokens": 256
                 }
             })).return_value,
@@ -181,7 +181,7 @@ class TestPlannerChain(unittest.TestCase):
         self.assertEqual(result.chain[1]["params"]["anchor"], "Microsoft")
 
     @patch("builtins.open", new_callable=mock_open)
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "mock_openai_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"}, clear=True)
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "mock_gemini_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"}, clear=True)
     @patch("graph_rag.llm_client._get_redis_client")
     @patch("graph_rag.llm_client.call_llm_structured")
     @patch("graph_rag.llm_client.consume_token")
@@ -194,11 +194,11 @@ class TestPlannerChain(unittest.TestCase):
             mock_open(read_data=json.dumps({
                 "schema": {"allow_list_path": "allow_list.json"},
                 "llm": {
-                    "model": "gpt-4o",
+                    "model": "gemini-2.0-flash-exp",
                     "max_tokens": 512,
                     "rate_limit_per_minute": 60,
                     "redis_url": "redis://localhost:6379/0",
-                    "planner_model": "gpt-4o",
+                    "planner_model": "gemini-2.0-flash-exp",
                     "planner_max_tokens": 256
                 }
             })).return_value,

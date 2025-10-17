@@ -50,7 +50,7 @@ class TestPlannerLLMSimple(unittest.TestCase):
         self.assertEqual(output_dict["confidence"], 0.85)
         self.assertIsNone(output_dict["chain"])
 
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "mock_key"})
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "mock_key"})
     def test_template_summary_building(self):
         """Test that template summary can be built."""
         from graph_rag.planner import _build_template_summary

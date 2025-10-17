@@ -18,8 +18,9 @@ observability:
   metrics_port: 8000
 
 llm:
-  provider: "openai"
-  model: "gpt-4o"
+  provider: "gemini"
+  model: "gemini-2.0-flash-exp"
+  embedding_model: "models/text-embedding-004"
   max_tokens: 512
   rate_limit_per_minute: 60
   redis_url: "redis://localhost:6379/0"

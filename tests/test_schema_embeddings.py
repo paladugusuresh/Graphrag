@@ -140,7 +140,7 @@ class TestSchemaEmbeddings(unittest.TestCase):
         synonym_terms_set = {t['term'] for t in person_synonyms}
         self.assertEqual(synonym_terms_set, {"Individual", "Human"})
 
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "mock_key"})
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "mock_key"})
     @patch("graph_rag.schema_embeddings.get_embedding_provider")
     def test_compute_embeddings(self, mock_get_embedding_provider):
         """Test computing embeddings for terms."""
@@ -171,7 +171,7 @@ class TestSchemaEmbeddings(unittest.TestCase):
         embeddings = compute_embeddings([])
         self.assertEqual(embeddings, [])
 
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "mock_key"})
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "mock_key"})
     @patch("graph_rag.schema_embeddings.get_embedding_provider")
     @patch("builtins.open", new_callable=mock_open)
     def test_generate_schema_embeddings(self, mock_file_open, mock_get_embedding_provider):
@@ -257,7 +257,7 @@ class TestSchemaEmbeddings(unittest.TestCase):
         # Should return empty list when allow_list.json is missing
         self.assertEqual(terms, [])
 
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "mock_key"})
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "mock_key"})
     @patch("graph_rag.schema_embeddings.get_embedding_provider")
     def test_compute_embeddings_error_handling(self, mock_get_embedding_provider):
         """Test error handling in compute_embeddings."""

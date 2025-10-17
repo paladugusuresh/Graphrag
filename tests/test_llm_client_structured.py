@@ -26,7 +26,7 @@ class TestLLMClientStructured(unittest.TestCase):
     @patch.dict(os.environ, {"REDIS_URL": "redis://localhost:6379/0", "DEV_MODE": "true"}, clear=True)
     @patch("builtins.open", new_callable=mock_open, read_data=json.dumps({
         "llm": {
-            "model": "gpt-4o",
+            "model": "gemini-2.0-flash-exp",
             "max_tokens": 512,
             "rate_limit_per_minute": 60,
             "redis_url": "redis://localhost:6379/0"
@@ -63,7 +63,7 @@ class TestLLMClientStructured(unittest.TestCase):
     @patch.dict(os.environ, {"REDIS_URL": "redis://localhost:6379/0", "DEV_MODE": "true"}, clear=True)
     @patch("builtins.open", new_callable=mock_open, read_data=json.dumps({
         "llm": {
-            "model": "gpt-4o",
+            "model": "gemini-2.0-flash-exp",
             "max_tokens": 512,
             "rate_limit_per_minute": 60,
             "redis_url": "redis://localhost:6379/0"
@@ -100,7 +100,7 @@ class TestLLMClientStructured(unittest.TestCase):
     @patch.dict(os.environ, {"REDIS_URL": "redis://localhost:6379/0", "DEV_MODE": "true"}, clear=True)
     @patch("builtins.open", new_callable=mock_open, read_data=json.dumps({
         "llm": {
-            "model": "gpt-4o",
+            "model": "gemini-2.0-flash-exp",
             "max_tokens": 512,
             "rate_limit_per_minute": 60,
             "redis_url": "redis://localhost:6379/0"
@@ -128,7 +128,7 @@ class TestLLMClientStructured(unittest.TestCase):
     @patch.dict(os.environ, {"REDIS_URL": "redis://localhost:6379/0", "DEV_MODE": "true"}, clear=True)
     @patch("builtins.open", new_callable=mock_open, read_data=json.dumps({
         "llm": {
-            "model": "gpt-4o",
+            "model": "gemini-2.0-flash-exp",
             "max_tokens": 512,
             "rate_limit_per_minute": 60,
             "redis_url": "redis://localhost:6379/0"
