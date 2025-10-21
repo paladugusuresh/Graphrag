@@ -1,0 +1,23 @@
+{
+  "labels": {
+    "Person": ["Student", "Pupil", "Individual", "User"],
+    "Company": ["Organization", "Corporation", "Business", "Firm"],
+    "Document": ["File", "Paper", "Record", "Report"],
+    "Chunk": ["Section", "Fragment", "Segment", "Part"],
+    "Entity": ["Object", "Item", "Thing", "Element"]
+  },
+  "relationships": {
+    "WORKS_FOR": ["EMPLOYED_BY", "WORKS_AT", "WORKS_IN"],
+    "MENTIONS": ["REFERENCES", "CITES", "INCLUDES"],
+    "HAS_CHUNK": ["CONTAINS", "INCLUDES", "HAS_PART"],
+    "PART_OF": ["BELONGS_TO", "MEMBER_OF", "COMPONENT_OF"],
+    "FOUNDED": ["CREATED", "ESTABLISHED", "STARTED"]
+  },
+  "properties": {
+    "name": ["title", "identifier", "label"],
+    "age": ["years_old", "age_years", "age_in_years"],
+    "email": ["email_address", "e_mail", "mail"],
+    "phone": ["phone_number", "telephone", "contact_number"],
+    "address": ["location", "residence", "home_address"]
+  }
+}

@@ -61,30 +61,29 @@ def collect_schema_terms() -> List[Dict[str, Any]]:
         })
     
     # Load synonyms if available
-    synonyms_path = get_config_value('schema_embeddings.include_synonyms_path')
-    if synonyms_path and os.path.exists(synonyms_path):
-        try:
-            with open(synonyms_path, 'r') as f:
-                synonyms = json.load(f)
+    from graph_rag.schema_manager import load_synonyms_optional
+    synonyms = load_synonyms_optional("config/synonyms.json")
+    
+    if synonyms:
+        # Add synonyms for existing terms
+        for term_data in terms[:]:  # Create copy to avoid modifying during iteration
+            canonical_id = term_data['canonical_id']
+            term_type = term_data['type']
             
-            # Add synonyms for existing terms
-            for term_data in terms[:]:  # Create copy to avoid modifying during iteration
-                canonical_id = term_data['canonical_id']
-                term_type = term_data['type']
-                
-                # Check if this term has synonyms
-                if canonical_id in synonyms.get(term_type, {}):
-                    for synonym in synonyms[term_type][canonical_id]:
-                        terms.append({
-                            "id": f"{term_type}:{synonym}",
-                            "term": synonym,
-                            "type": term_type,
-                            "canonical_id": canonical_id  # Points to the original term
-                        })
+            # Map term_type to synonyms structure
+            synonyms_key = 'labels' if term_type == 'label' else 'relationships' if term_type == 'relationship' else 'properties'
             
-            logger.info(f"Loaded synonyms from {synonyms_path}")
-        except Exception as e:
-            logger.warning(f"Failed to load synonyms from {synonyms_path}: {e}")
+            # Check if this term has synonyms
+            if canonical_id in synonyms.get(synonyms_key, {}):
+                for synonym in synonyms[synonyms_key][canonical_id]:
+                    terms.append({
+                        "id": f"{term_type}:{synonym}",
+                        "term": synonym,
+                        "type": term_type,
+                        "canonical_id": canonical_id  # Points to the original term
+                    })
+        
+        logger.info(f"Loaded synonyms from config/synonyms.json")
     
     logger.info(f"Collected {len(terms)} schema terms ({len([t for t in terms if t['term'] == t['canonical_id']])} canonical + {len([t for t in terms if t['term'] != t['canonical_id']])} synonyms)")
     return terms

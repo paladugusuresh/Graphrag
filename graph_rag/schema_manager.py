@@ -15,6 +15,65 @@ from graph_rag.flags import RETRIEVAL_CHUNK_EMBEDDINGS_ENABLED
 logger = get_logger(__name__)
 
 
+def load_synonyms_optional(path: str = "config/synonyms.json") -> Optional[Dict[str, Any]]:
+    """
+    Load synonyms from JSON file if present, return None if missing/invalid.
+    
+    This is a non-blocking function that gracefully handles missing or malformed files.
+    
+    Args:
+        path: Path to the synonyms JSON file
+        
+    Returns:
+        Dict with synonyms structure: {"labels": {...}, "relationships": {...}, "properties": {...}}
+        None if file is missing, invalid, or cannot be read
+        
+    Expected JSON structure:
+        {
+            "labels": {
+                "Person": ["Student", "Pupil", "Individual"],
+                "Company": ["Organization", "Corporation"]
+            },
+            "relationships": {
+                "WORKS_FOR": ["EMPLOYED_BY", "WORKS_AT"],
+                "MENTIONS": ["REFERENCES", "CITES"]
+            },
+            "properties": {
+                "name": ["title", "identifier"],
+                "age": ["years_old", "age_years"]
+            }
+        }
+    """
+    try:
+        if not os.path.exists(path):
+            logger.debug(f"Synonyms file not found: {path}")
+            return None
+        
+        with open(path, 'r', encoding='utf-8') as f:
+            synonyms = json.load(f)
+        
+        # Validate structure
+        if not isinstance(synonyms, dict):
+            logger.warning(f"Synonyms file {path} contains invalid structure: expected dict, got {type(synonyms)}")
+            return None
+        
+        # Count synonyms for debug logging
+        labels_count = len(synonyms.get('labels', {}))
+        relationships_count = len(synonyms.get('relationships', {}))
+        properties_count = len(synonyms.get('properties', {}))
+        
+        logger.debug(f"Loaded synonyms (labels:{labels_count}, rels:{relationships_count}, props:{properties_count})")
+        
+        return synonyms
+        
+    except json.JSONDecodeError as e:
+        logger.warning(f"Synonyms file {path} contains invalid JSON: {e}")
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to load synonyms from {path}: {e}")
+        return None
+
+
 def _is_write_allowed() -> bool:
     """
     Check if schema writes are allowed based on APP_MODE and ALLOW_WRITES env vars.
