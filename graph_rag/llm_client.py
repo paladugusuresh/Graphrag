@@ -180,7 +180,7 @@ def call_llm_raw(prompt: str, model: str, max_tokens: int = 512, temperature: fl
         # Return a safe default for graceful degradation
         return '{"intent":"general_rag_query","anchor":null}'
 
-def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None, max_tokens: int = None, example_structure: str = None):
+def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None, max_tokens: int = None, example_structure: str = None, force_json_mode: bool = False, force_temperature_zero: bool = False):
     """
     Calls LLM and validates JSON output against schema_model (a Pydantic model class).
     Returns validated object instance or raises LLMStructuredError.
@@ -203,9 +203,9 @@ def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None,
     max_tokens = max_tokens or get_config_value('llm.max_tokens', 512)
     
     # Check feature flags
-    json_mode_enabled = LLM_JSON_MODE_ENABLED()
-    tolerant_parser_enabled = LLM_TOLERANT_JSON_PARSER()
-    temperature = 0.0  # Always 0 for deterministic structured output
+    json_mode_enabled = LLM_JSON_MODE_ENABLED() or force_json_mode
+    tolerant_parser_enabled = LLM_TOLERANT_JSON_PARSER() and not force_json_mode  # Disable tolerant parser when JSON mode is forced
+    temperature = 0.0 if force_temperature_zero else 0.0  # Always 0 for deterministic structured output
     max_retries = 2  # Always retry up to 2 times for structured calls
     
     # Build structured prompt with explicit JSON requirements

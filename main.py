@@ -10,7 +10,7 @@ from graph_rag.conversation_store import conversation_store
 from graph_rag.sanitizer import sanitize_text, is_probably_malicious
 from graph_rag.audit_store import audit_store
 from graph_rag.guardrail import guardrail_check
-from graph_rag.config_manager import get_config_value
+from graph_rag.config_manager import get_config_value, ensure_production_flags
 from graph_rag.schema_manager import ensure_schema_loaded, ensure_chunk_vector_index
 from graph_rag.schema_embeddings import upsert_schema_embeddings
 from graph_rag.flags import get_all_flags, SCHEMA_BOOTSTRAP_ENABLED
@@ -21,6 +21,9 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize services on application startup"""
+    # Ensure production flags are set correctly
+    ensure_production_flags()
+    
     # Log feature flags at startup (DEBUG level)
     flags = get_all_flags()
     logger.debug(f"Feature flags: {flags}")

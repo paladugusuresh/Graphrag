@@ -61,7 +61,9 @@ Respond with your classification:"""
             prompt=prompt,
             schema_model=GuardrailResponse,
             model=None,  # Use default model from config
-            max_tokens=100  # Keep response short
+            max_tokens=100,  # Keep response short
+            force_json_mode=True,  # Always enforce JSON mode for guardrails
+            force_temperature_zero=True  # Always use temperature=0 for guardrails
         )
         
         logger.info(f"Guardrail check - Question: {sanitized_question[:50]}... | Allowed: {response.allowed} | Reason: {response.reason}")
@@ -85,65 +87,14 @@ Respond with your classification:"""
         return response.allowed
         
     except LLMStructuredError as e:
-        # Check if we should fail closed (production) or open (development)
+        # In production, always fail closed - no dev bypass, no tolerant parsing
         fail_closed = GUARDRAILS_FAIL_CLOSED_DEV()
-        tolerant_parser_enabled = LLM_TOLERANT_JSON_PARSER()
-        
-        # Try tolerant parsing if enabled and we're in dev mode
-        if not fail_closed and tolerant_parser_enabled:
-            logger.info("Attempting tolerant JSON parsing for guardrail response")
-            try:
-                # Extract the raw response from the LLM call
-                # We need to make a raw call to get the unparsed response
-                from graph_rag.llm_client import call_llm_raw
-                raw_response = call_llm_raw(
-                    prompt=prompt,
-                    model=get_config_value('llm.model', 'gemini-2.0-flash-exp'),
-                    max_tokens=100,
-                    temperature=0.0,
-                    json_mode=True
-                )
-                
-                # Try tolerant parsing
-                parsed_data = tolerant_json_parse(raw_response, schema_type="guardrail")
-                if parsed_data:
-                    # Normalize the response
-                    normalized = normalize_guardrail_response(parsed_data)
-                    
-                    # Create a GuardrailResponse object
-                    response = GuardrailResponse(
-                        allowed=normalized.get('allowed', False),
-                        reason=normalized.get('reason', 'Tolerant parsing applied')
-                    )
-                    
-                    logger.info(f"Guardrail tolerant parsing succeeded - Question: {sanitized_question[:50]}... | Allowed: {response.allowed} | Reason: {response.reason}")
-                    
-                    add_span_attributes(span,
-                        allowed=response.allowed,
-                        reason=response.reason,
-                        sanitized_question=sanitized_question[:100],
-                        tolerant_parsing_used=True
-                    )
-                    
-                    # Audit log the tolerant parsing success
-                    audit_store.record({
-                        "event": "guardrail_tolerant_parsing_success",
-                        "reason": "Tolerant JSON parsing succeeded",
-                        "question_preview": sanitized_question[:100],
-                        "trace_id": trace_id,
-                        "tolerant_parser_enabled": True
-                    })
-                    
-                    return response.allowed
-                else:
-                    logger.warning("Tolerant parsing also failed, falling back to dev bypass")
-            except Exception as tolerant_error:
-                logger.warning(f"Tolerant parsing failed: {tolerant_error}, falling back to dev bypass")
         
         if fail_closed:
-            # Production mode: Fail closed - block on LLM errors
-            logger.error(f"Guardrail LLM classification failed (FAIL_CLOSED): {e}")
-            logger.warning(f"Blocking question due to classification failure: {sanitized_question[:50]}...")
+            # Production mode: Fail closed - block on LLM errors with actionable error message
+            error_msg = f"Guardrail validation failed: {str(e)}"
+            logger.error(f"Guardrail LLM classification failed (PRODUCTION FAIL_CLOSED): {error_msg}")
+            logger.error(f"Blocking question due to classification failure: {sanitized_question[:50]}...")
             
             guardrail_blocks_total.labels(reason="llm_classification_error").inc()
             
@@ -151,30 +102,87 @@ Respond with your classification:"""
                 allowed=False,
                 reason="llm_classification_error",
                 fail_mode="closed",
-                error=str(e)
+                error=str(e),
+                production_mode=True
             )
             
             # Audit log the classification failure
             audit_store.record({
                 "event": "guardrail_classification_failed",
-                "reason": "LLM classification error",
+                "reason": "LLM classification error - production mode",
                 "error": str(e),
                 "question_preview": sanitized_question[:100],
                 "trace_id": trace_id,
-                "fail_mode": "closed"
+                "fail_mode": "closed",
+                "production_mode": True
             })
             
             return False
         else:
+            # Development mode: Try tolerant parsing if enabled
+            tolerant_parser_enabled = LLM_TOLERANT_JSON_PARSER()
+            
+            if tolerant_parser_enabled:
+                logger.info("Attempting tolerant JSON parsing for guardrail response (DEV mode)")
+                try:
+                    # Extract the raw response from the LLM call
+                    from graph_rag.llm_client import call_llm_raw
+                    raw_response = call_llm_raw(
+                        prompt=prompt,
+                        model=get_config_value('llm.model', 'gemini-2.0-flash-exp'),
+                        max_tokens=100,
+                        temperature=0.0,
+                        json_mode=True
+                    )
+                    
+                    # Try tolerant parsing
+                    parsed_data = tolerant_json_parse(raw_response, schema_type="guardrail")
+                    if parsed_data:
+                        # Normalize the response
+                        normalized = normalize_guardrail_response(parsed_data)
+                        
+                        # Create a GuardrailResponse object
+                        response = GuardrailResponse(
+                            allowed=normalized.get('allowed', False),
+                            reason=normalized.get('reason', 'Tolerant parsing applied')
+                        )
+                        
+                        logger.info(f"Guardrail tolerant parsing succeeded (DEV) - Question: {sanitized_question[:50]}... | Allowed: {response.allowed} | Reason: {response.reason}")
+                        
+                        add_span_attributes(span,
+                            allowed=response.allowed,
+                            reason=response.reason,
+                            sanitized_question=sanitized_question[:100],
+                            tolerant_parsing_used=True,
+                            dev_mode=True
+                        )
+                        
+                        # Audit log the tolerant parsing success
+                        audit_store.record({
+                            "event": "guardrail_tolerant_parsing_success",
+                            "reason": "Tolerant JSON parsing succeeded (DEV mode)",
+                            "question_preview": sanitized_question[:100],
+                            "trace_id": trace_id,
+                            "tolerant_parser_enabled": True,
+                            "dev_mode": True
+                        })
+                        
+                        return response.allowed
+                    else:
+                        logger.warning("Tolerant parsing also failed, falling back to dev bypass")
+                except Exception as tolerant_error:
+                    logger.warning(f"Tolerant parsing failed: {tolerant_error}, falling back to dev bypass")
+            
             # Development mode: Fail open - allow on LLM errors with warning
-            logger.warning(f"Guardrail LLM classification failed (FAIL_OPEN/DEV): {e}")
+            logger.warning(f"Guardrail LLM classification failed (DEV FAIL_OPEN): {e}")
             logger.warning(f"Allowing question despite classification failure (DEV mode): {sanitized_question[:50]}...")
             
             add_span_attributes(span,
                 allowed=True,
                 reason="dev_mode_fail_open",
                 fail_mode="open",
-                error=str(e)
+                error=str(e),
+                dev_mode=True
             )
             
             # Audit log the classification failure with allow action
@@ -184,7 +192,8 @@ Respond with your classification:"""
                 "error": str(e),
                 "question_preview": sanitized_question[:100],
                 "trace_id": trace_id,
-                "fail_mode": "open"
+                "fail_mode": "open",
+                "dev_mode": True
             })
             
             return True  # Allow in dev mode

@@ -186,6 +186,43 @@ def reload_config():
     _config_manager.reload()
 
 
+def ensure_production_flags():
+    """
+    Ensure production environment flags are set correctly.
+    This function should be called at application startup to verify
+    that production deployments have the correct guardrail settings.
+    """
+    import os
+    
+    # Check if we're in production mode
+    app_mode = os.getenv("APP_MODE", "read_only").lower()
+    dev_mode = os.getenv("DEV_MODE", "").lower() in ("true", "1", "yes")
+    
+    # If not in dev mode, ensure production flags are set
+    if not dev_mode:
+        required_flags = {
+            "LLM_JSON_MODE_ENABLED": "true",
+            "LLM_TOLERANT_JSON_PARSER": "false", 
+            "GUARDRAILS_FAIL_CLOSED_DEV": "true"
+        }
+        
+        missing_flags = []
+        for flag, expected_value in required_flags.items():
+            current_value = os.getenv(flag, "").lower()
+            if current_value != expected_value.lower():
+                missing_flags.append(f"{flag}={expected_value}")
+        
+        if missing_flags:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Production environment missing required flags: {', '.join(missing_flags)}")
+            logger.warning("For production deployments, ensure these environment variables are set:")
+            for flag in missing_flags:
+                logger.warning(f"  export {flag}")
+    
+    return True
+
+
 def subscribe_to_config_reload(callback: Callable[[Dict[str, Any]], None]):
     """Subscribe to config reload notifications"""
     global _config_manager
