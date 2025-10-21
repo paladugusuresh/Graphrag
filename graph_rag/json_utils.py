@@ -212,7 +212,74 @@ def redact_sensitive_content(text: str, max_length: int = 512) -> str:
     return redacted
 
 
-def log_json_parse_error(text: str, error: Exception, context: str = ""):
+def safe_parse_json(raw_text: str) -> Optional[Dict[str, Any]]:
+    """
+    Safely parse JSON with automatic repairs for common malformations.
+    
+    This function implements a multi-stage parsing strategy:
+    1. Try standard JSON parsing
+    2. Apply common repairs (trailing commas, quotes, markdown fences)
+    3. Extract first JSON object from text
+    
+    Args:
+        raw_text: Raw text from LLM that should contain JSON
+        
+    Returns:
+        Parsed JSON dict, or None if all parsing attempts fail
+    """
+    if not raw_text or not isinstance(raw_text, str):
+        return None
+    
+    # Stage 1: Try standard JSON parsing
+    try:
+        parsed = json.loads(raw_text)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    
+    # Stage 2: Apply common repairs
+    repaired_text = raw_text.strip()
+    
+    # Remove markdown code fences
+    if repaired_text.startswith('```'):
+        # Remove opening fence
+        lines = repaired_text.split('\n')
+        if lines:
+            lines = lines[1:]  # Remove first line (```json or ```)
+        # Remove closing fence
+        if lines and lines[-1].strip() == '```':
+            lines = lines[:-1]
+        repaired_text = '\n'.join(lines).strip()
+    
+    # Strip trailing commas before closing braces/brackets
+    repaired_text = re.sub(r',(\s*[}\]])', r'\1', repaired_text)
+    
+    # Convert single quotes to double quotes (when safe)
+    # Only convert quotes that are clearly field names or values
+    repaired_text = re.sub(r"'([^']*)'(\s*:\s*)", r'"\1"\2', repaired_text)  # Field names
+    repaired_text = re.sub(r":\s*'([^']*)'", r': "\1"', repaired_text)  # String values
+    
+    # Try parsing after repairs
+    try:
+        parsed = json.loads(repaired_text)
+        if isinstance(parsed, dict):
+            logger.info("JSON parsing succeeded after repairs")
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    
+    # Stage 3: Try extracting first JSON object
+    extracted = extract_first_json(repaired_text)
+    if extracted:
+        logger.info("JSON parsing succeeded via extraction")
+        return extracted
+    
+    logger.warning("All JSON parsing attempts failed")
+    return None
+
+
+def log_json_parse_error(text: str, error: Exception, context: str = "", attempt: int = 1):
     """
     Log JSON parsing errors with redacted content.
     
@@ -220,10 +287,19 @@ def log_json_parse_error(text: str, error: Exception, context: str = ""):
         text: Original text that failed to parse
         error: Exception that occurred
         context: Additional context for logging
+        attempt: Attempt number (for logging first failure with full detail)
     """
-    redacted_text = redact_sensitive_content(text)
-    logger.error(f"JSON parsing failed {context}: {error}")
-    logger.debug(f"Redacted content: {redacted_text}")
+    # On first failure, log more detail with redacted raw body
+    if attempt == 1:
+        # Log 200 characters of redacted content on first failure
+        redacted_preview = redact_sensitive_content(text, max_length=200)
+        logger.warning(f"JSON parsing failed {context} (attempt {attempt}): {error}")
+        logger.warning(f"Redacted raw response preview: {redacted_preview}")
+    else:
+        # Subsequent failures get less detail
+        redacted_text = redact_sensitive_content(text, max_length=100)
+        logger.debug(f"JSON parsing failed {context} (attempt {attempt}): {error}")
+        logger.debug(f"Redacted content: {redacted_text}")
 
 
 # Health check utilities

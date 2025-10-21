@@ -9,7 +9,7 @@ from graph_rag.audit_store import audit_store
 from graph_rag.config_manager import get_config_value
 from graph_rag.dev_stubs import get_redis_client as get_redis_client_stub
 from graph_rag.flags import LLM_JSON_MODE_ENABLED, LLM_RATE_LIMIT_PER_MIN, LLM_TOLERANT_JSON_PARSER
-from graph_rag.json_utils import tolerant_json_parse, log_json_parse_error, redact_sensitive_content
+from graph_rag.json_utils import tolerant_json_parse, log_json_parse_error, redact_sensitive_content, safe_parse_json
 from graph_rag.rate_limit import rate_limited_llm, RateLimitExceeded
 from opentelemetry.trace import get_current_span
 
@@ -152,15 +152,17 @@ def call_llm_raw(prompt: str, model: str, max_tokens: int = 512, temperature: fl
         # Create a GenerativeModel instance
         gemini_model = client.GenerativeModel(model)
         
-        # Configure generation with max_tokens and temperature
+        # Configure generation with max_tokens, temperature, and strict JSON output
         generation_config = {
             "max_output_tokens": max_tokens,
             "temperature": temperature,
+            "top_p": 0.95,  # Lower top_p for more focused output
         }
         
-        # Add JSON mode if requested (Gemini uses response_mime_type)
+        # Always force JSON mode for structured output (Gemini uses response_mime_type)
         if json_mode:
             generation_config["response_mime_type"] = "application/json"
+            generation_config["top_p"] = 0.9  # Even lower top_p for JSON mode
         
         # Generate content
         response = gemini_model.generate_content(
@@ -202,10 +204,11 @@ def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None,
     model = model or get_config_value('llm.model', 'gemini-2.0-flash-exp')
     max_tokens = max_tokens or get_config_value('llm.max_tokens', 512)
     
-    # Check feature flags
-    json_mode_enabled = LLM_JSON_MODE_ENABLED() or force_json_mode
-    tolerant_parser_enabled = LLM_TOLERANT_JSON_PARSER() and not force_json_mode  # Disable tolerant parser when JSON mode is forced
-    temperature = 0.0 if force_temperature_zero else 0.0  # Always 0 for deterministic structured output
+    # Always force strict JSON output for all LLM calls
+    # Check feature flags (but default to true for production safety)
+    json_mode_enabled = True  # Always true - force strict JSON for all calls
+    tolerant_parser_enabled = False  # Disabled - we use safe_parse_json instead
+    temperature = 0.0  # Always 0 for deterministic structured output
     max_retries = 2  # Always retry up to 2 times for structured calls
     
     # Build structured prompt with explicit JSON requirements
@@ -224,34 +227,24 @@ def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None,
                 json_mode=json_mode_enabled
             )
 
-            # Try to parse JSON with tolerance if enabled
-            parsed = None
+            # Use safe_parse_json for automatic repair and tolerant parsing
+            parsed = safe_parse_json(response)
             json_parse_error = None
             
-            try:
-                # First try standard JSON parsing
-                parsed = json.loads(response)
-            except json.JSONDecodeError as e:
-                json_parse_error = e
-                
-                # If tolerant parser is enabled, try tolerant parsing
-                if tolerant_parser_enabled:
-                    logger.debug("Standard JSON parsing failed, trying tolerant parser")
-                    parsed = tolerant_json_parse(response, schema_type="general")
-                    
-                    if parsed is not None:
-                        logger.info("Tolerant JSON parser succeeded")
-                    else:
-                        logger.warning("Tolerant JSON parser also failed")
-                else:
-                    logger.debug("Tolerant parser disabled, skipping tolerant parsing")
+            # If safe_parse_json failed, capture error for logging
+            if parsed is None:
+                try:
+                    json.loads(response)
+                except json.JSONDecodeError as e:
+                    json_parse_error = e
             
             # If parsing failed completely, handle retry or error
             if parsed is None:
                 if attempt < max_retries:
                     logger.warning(f"LLM returned non-JSON (attempt {attempt + 1}/{max_retries + 1}), retrying...")
+                    # Log with detailed redacted preview on first failure
                     if json_parse_error:
-                        log_json_parse_error(response, json_parse_error, f"attempt {attempt + 1}")
+                        log_json_parse_error(response, json_parse_error, f"attempt {attempt + 1}", attempt=attempt + 1)
                     last_error = json_parse_error or Exception("JSON parsing failed")
                     continue
                 
@@ -281,6 +274,11 @@ def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None,
             except ValidationError as e:
                 if attempt < max_retries:
                     logger.warning(f"LLM output failed validation (attempt {attempt + 1}/{max_retries + 1}), retrying...")
+                    # Log redacted raw body on first validation failure
+                    if attempt == 0:
+                        redacted_preview = redact_sensitive_content(response, max_length=200)
+                        logger.warning(f"Validation error details: {str(e)[:200]}")
+                        logger.warning(f"Redacted raw response preview: {redacted_preview}")
                     last_error = e
                     continue
                 
