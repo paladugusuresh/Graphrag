@@ -13,7 +13,7 @@ from graph_rag.guardrail import guardrail_check
 from graph_rag.config_manager import get_config_value
 from graph_rag.schema_manager import ensure_schema_loaded
 from graph_rag.schema_embeddings import upsert_schema_embeddings
-from graph_rag.flags import get_all_flags
+from graph_rag.flags import get_all_flags, SCHEMA_BOOTSTRAP_ENABLED
 import uuid
 
 logger = get_logger(__name__)
@@ -25,20 +25,50 @@ async def lifespan(app: FastAPI):
     flags = get_all_flags()
     logger.debug(f"Feature flags: {flags}")
     
-    # Ensure schema is loaded at startup
-    ensure_schema_loaded()
+    # Check if schema bootstrap is enabled
+    schema_bootstrap_enabled = SCHEMA_BOOTSTRAP_ENABLED()
+    app_mode = os.getenv("APP_MODE", "read_only").lower()
+    allow_writes = os.getenv("ALLOW_WRITES", "false").lower() in ("true", "1", "yes", "on")
+    write_allowed = app_mode == "admin" or allow_writes
     
-    # Upsert schema embeddings (idempotent)
-    try:
-        upsert_schema_embeddings()  # idempotent — create/verify vector index & SchemaTerm nodes
-        logger.info("Schema ingestion and embeddings upsert complete")
-    except Exception as e:
-        logger.error(f"Schema embeddings upsert failed: {e}")
-        audit_store.record({
-            "event": "schema_ingest_failed",
-            "error": str(e),
-            "timestamp": str(uuid.uuid4())
-        })
+    logger.info(f"Schema bootstrap: enabled={schema_bootstrap_enabled}, write_allowed={write_allowed}")
+    
+    if schema_bootstrap_enabled and write_allowed:
+        # Admin/write mode: Generate schema and upsert embeddings (idempotent)
+        try:
+            logger.info("Running schema bootstrap in write mode")
+            ensure_schema_loaded()  # Will skip if fingerprint unchanged
+            
+            # Upsert schema embeddings (idempotent)
+            result = upsert_schema_embeddings()
+            logger.info(f"Schema ingestion complete: {result.get('status')}")
+            
+            # Record successful bootstrap
+            audit_store.record({
+                "event": "schema_bootstrap_complete",
+                "status": result.get("status"),
+                "nodes_created": result.get("nodes_created", 0),
+                "nodes_updated": result.get("nodes_updated", 0),
+                "timestamp": str(uuid.uuid4())
+            })
+        except Exception as e:
+            logger.error(f"Schema bootstrap failed: {e}")
+            audit_store.record({
+                "event": "schema_bootstrap_failed",
+                "error": str(e),
+                "timestamp": str(uuid.uuid4())
+            })
+            # Don't fail startup, continue in degraded mode
+    elif schema_bootstrap_enabled:
+        # Bootstrap enabled but read-only mode: Only load existing schema
+        try:
+            logger.info("Loading existing schema in read-only mode")
+            ensure_schema_loaded()  # Will load existing allow-list
+        except FileNotFoundError as e:
+            logger.error(f"Schema load failed in read-only mode: {e}")
+            logger.warning("Application starting without schema - queries may fail")
+    else:
+        logger.info("Schema bootstrap disabled, skipping schema loading")
     
     conversation_store.init()
     # Start metrics server if enabled in config
