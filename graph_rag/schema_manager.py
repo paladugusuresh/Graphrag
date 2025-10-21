@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional
 from graph_rag.observability import get_logger
 from graph_rag.config_manager import get_config_value
 from graph_rag.dev_stubs import is_dev_mode
+from graph_rag.flags import RETRIEVAL_CHUNK_EMBEDDINGS_ENABLED
 
 logger = get_logger(__name__)
 
@@ -213,3 +214,145 @@ def get_allow_list() -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Failed to read allow list file {allow_list_path}: {e}")
         raise
+
+
+def _get_embedding_dimensions() -> Optional[int]:
+    """
+    Get embedding dimensions from the embedding provider.
+    
+    Returns:
+        Number of dimensions for embeddings, or None if unable to determine
+    """
+    try:
+        from graph_rag.embeddings import get_embedding_provider
+        
+        # Get a test embedding to determine dimensions
+        provider = get_embedding_provider()
+        test_embeddings = provider.get_embeddings(["test"])
+        
+        if test_embeddings and len(test_embeddings) > 0:
+            dimensions = len(test_embeddings[0])
+            logger.debug(f"Detected embedding dimensions: {dimensions}")
+            return dimensions
+        else:
+            logger.warning("Failed to get test embedding for dimension detection")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Failed to detect embedding dimensions: {e}")
+        return None
+
+
+def _check_chunk_vector_index_exists() -> bool:
+    """
+    Check if the chunk_embeddings vector index exists and is online.
+    
+    Returns:
+        True if index exists and is online, False otherwise
+    """
+    try:
+        from graph_rag.neo4j_client import Neo4jClient
+        
+        client = Neo4jClient()
+        
+        # Query to check for existing vector index
+        query = """
+        SHOW INDEXES 
+        WHERE type = 'VECTOR' 
+        AND name = 'chunk_embeddings'
+        AND state = 'ONLINE'
+        """
+        
+        results = client.execute_read_query(query, query_name="check_chunk_vector_index")
+        
+        # Check if we found an online vector index
+        exists = len(results) > 0
+        logger.debug(f"Chunk vector index exists and online: {exists}")
+        
+        return exists
+        
+    except Exception as e:
+        logger.error(f"Failed to check chunk vector index existence: {e}")
+        return False
+
+
+def _create_chunk_vector_index(dimensions: int) -> bool:
+    """
+    Create the chunk_embeddings vector index with HNSW algorithm.
+    
+    Args:
+        dimensions: Number of dimensions for the vector index
+        
+    Returns:
+        True if index creation succeeded, False otherwise
+    """
+    try:
+        from graph_rag.neo4j_client import Neo4jClient
+        
+        client = Neo4jClient()
+        
+        # Create vector index with HNSW algorithm
+        query = f"""
+        CREATE VECTOR INDEX chunk_embeddings 
+        FOR (c:Chunk) ON (c.embedding) 
+        OPTIONS {{
+            indexConfig: {{
+                `vector.dimensions`: {dimensions},
+                `vector.similarity_function`: 'cosine'
+            }}
+        }}
+        """
+        
+        logger.info(f"Creating chunk vector index with {dimensions} dimensions")
+        results = client.execute_write_query(query, query_name="create_chunk_vector_index")
+        
+        logger.info("Chunk vector index creation initiated successfully")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to create chunk vector index: {e}")
+        return False
+
+
+def ensure_chunk_vector_index() -> bool:
+    """
+    Ensure chunk vector index exists and is online.
+    
+    This function:
+    1. Checks if RETRIEVAL_CHUNK_EMBEDDINGS_ENABLED is true (skip if false)
+    2. Detects embedding dimensions from provider
+    3. Checks if index already exists and is online
+    4. Creates index if it doesn't exist
+    
+    Returns:
+        True if index exists/created successfully, False otherwise
+    """
+    # Check if chunk embeddings are enabled
+    if not RETRIEVAL_CHUNK_EMBEDDINGS_ENABLED():
+        logger.debug("Chunk embeddings disabled, skipping vector index creation")
+        return True  # Not an error, just skipped
+    
+    # Check write permissions
+    if not _is_write_allowed():
+        logger.warning("Write operations not allowed, cannot create vector index")
+        return False
+    
+    # Check if index already exists
+    if _check_chunk_vector_index_exists():
+        logger.info("Chunk vector index already exists and is online")
+        return True
+    
+    # Detect embedding dimensions
+    dimensions = _get_embedding_dimensions()
+    if dimensions is None:
+        logger.error("Cannot determine embedding dimensions, skipping vector index creation")
+        return False
+    
+    # Create the index
+    success = _create_chunk_vector_index(dimensions)
+    if success:
+        logger.info(f"Chunk vector index creation completed with {dimensions} dimensions")
+    else:
+        logger.error("Failed to create chunk vector index")
+    
+    return success

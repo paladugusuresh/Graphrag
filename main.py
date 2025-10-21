@@ -11,7 +11,7 @@ from graph_rag.sanitizer import sanitize_text, is_probably_malicious
 from graph_rag.audit_store import audit_store
 from graph_rag.guardrail import guardrail_check
 from graph_rag.config_manager import get_config_value
-from graph_rag.schema_manager import ensure_schema_loaded
+from graph_rag.schema_manager import ensure_schema_loaded, ensure_chunk_vector_index
 from graph_rag.schema_embeddings import upsert_schema_embeddings
 from graph_rag.flags import get_all_flags, SCHEMA_BOOTSTRAP_ENABLED
 import uuid
@@ -42,6 +42,17 @@ async def lifespan(app: FastAPI):
             # Upsert schema embeddings (idempotent)
             result = upsert_schema_embeddings()
             logger.info(f"Schema ingestion complete: {result.get('status')}")
+            
+            # Ensure chunk vector index exists (if enabled)
+            try:
+                vector_index_success = ensure_chunk_vector_index()
+                if vector_index_success:
+                    logger.info("Chunk vector index verification/creation completed")
+                else:
+                    logger.warning("Chunk vector index verification/creation failed")
+            except Exception as e:
+                logger.error(f"Chunk vector index operation failed: {e}")
+                # Don't fail startup, continue without vector index
             
             # Record successful bootstrap
             audit_store.record({
