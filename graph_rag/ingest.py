@@ -32,9 +32,16 @@ class ExtractedNode(BaseModel):
     id: str
     type: str
 
+class ExtractedRelationship(BaseModel):
+    source_id: str
+    target_id: str
+    relationship_type: str
+    source_label: str
+    target_label: str
+
 class ExtractedGraph(BaseModel):
     nodes: list[ExtractedNode] = []
-    relationships: list[dict] = []
+    relationships: list[ExtractedRelationship] = []
 
 def parse_frontmatter(text: str):
     if text.startswith("---"):
@@ -130,11 +137,90 @@ def process_and_ingest_files():
                     try:
                         validated_label = validate_label(node.type, allow_list)
                         client.execute_write_query(f"MERGE (n:{validated_label} {{id: $id}})", {"id": node.id}, timeout=get_config_value('guardrails.neo4j_timeout', 10))
-                        client.execute_write_query("MATCH (c:Chunk {id:$cid}) MATCH (e {id:$eid}) MERGE (c)-[:MENTIONS]->(e)", {"cid": chunk_id, "eid": node.id}, timeout=get_config_value('guardrails.neo4j_timeout', 10))
+                        
+                        # Create MENTIONS relationship with label-qualified entity matching
+                        try:
+                            # Validate MENTIONS relationship type
+                            validate_relationship_type("MENTIONS", allow_list)
+                            
+                            # Use label-qualified matching for safer edge creation
+                            client.execute_write_query(
+                                f"MATCH (c:Chunk {{id: $cid}}) MATCH (e:{validated_label} {{id: $eid}}) MERGE (c)-[:MENTIONS]->(e)",
+                                {"cid": chunk_id, "eid": node.id},
+                                timeout=get_config_value('guardrails.neo4j_timeout', 10)
+                            )
+                            
+                            # Audit successful relationship creation
+                            audit_store.record({
+                                "event": "ingest.relationship_created",
+                                "chunk_id": chunk_id,
+                                "entity_id": node.id,
+                                "entity_label": validated_label,
+                                "relationship_type": "MENTIONS",
+                                "status": "success"
+                            })
+                            
+                        except Exception as rel_error:
+                            logger.error(f"MENTIONS relationship creation failed for node {node.id} in chunk {chunk_id}: {rel_error}")
+                            audit_store.record({
+                                "event": "ingest.relationship_creation_failed",
+                                "chunk_id": chunk_id,
+                                "node_id": node.id,
+                                "relationship_type": "MENTIONS",
+                                "error": str(rel_error),
+                                "reason": "relationship_validation_failed"
+                            })
+                            # Continue with next node - relationship failure shouldn't stop node creation
+                            
                     except Exception as db_error:
                         logger.error(f"DB write failed for node {node.id} in chunk {chunk_id}: {db_error}")
                         audit_store.record({"event":"ingest.db_write_failed", "chunk_id": chunk_id, "node_id": node.id, "error": str(db_error)})
                         # Continue with next node
+                        continue
+                
+                # Process LLM-returned relationships with validation
+                for rel in g.relationships:
+                    try:
+                        # Validate source and target labels
+                        validated_source_label = validate_label(rel.source_label, allow_list)
+                        validated_target_label = validate_label(rel.target_label, allow_list)
+                        
+                        # Validate relationship type
+                        validated_rel_type = validate_relationship_type(rel.relationship_type, allow_list)
+                        
+                        # Create the relationship with label-qualified matching
+                        client.execute_write_query(
+                            f"MATCH (src:{validated_source_label} {{id: $src_id}}) MATCH (tgt:{validated_target_label} {{id: $tgt_id}}) MERGE (src)-[:{validated_rel_type}]->(tgt)",
+                            {"src_id": rel.source_id, "tgt_id": rel.target_id},
+                            timeout=get_config_value('guardrails.neo4j_timeout', 10)
+                        )
+                        
+                        # Audit successful relationship creation
+                        audit_store.record({
+                            "event": "ingest.relationship_created",
+                            "chunk_id": chunk_id,
+                            "source_id": rel.source_id,
+                            "target_id": rel.target_id,
+                            "source_label": validated_source_label,
+                            "target_label": validated_target_label,
+                            "relationship_type": validated_rel_type,
+                            "status": "success"
+                        })
+                        
+                    except Exception as rel_error:
+                        logger.error(f"LLM relationship creation failed for {rel.source_id}-[{rel.relationship_type}]->{rel.target_id} in chunk {chunk_id}: {rel_error}")
+                        audit_store.record({
+                            "event": "ingest.relationship_creation_failed",
+                            "chunk_id": chunk_id,
+                            "source_id": rel.source_id,
+                            "target_id": rel.target_id,
+                            "source_label": rel.source_label,
+                            "target_label": rel.target_label,
+                            "relationship_type": rel.relationship_type,
+                            "error": str(rel_error),
+                            "reason": "llm_relationship_validation_failed"
+                        })
+                        # Continue with next relationship
                         continue
             except LLMStructuredError as e:
                 logger.error(f"LLM extraction failed for chunk {chunk_id}: {e}")
