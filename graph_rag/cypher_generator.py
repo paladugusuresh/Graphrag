@@ -283,19 +283,31 @@ CRITICAL REQUIREMENTS:
 2. Use ONLY labels, relationships, and properties from the schema above
 3. Include LIMIT $limit clause in ALL queries (use provided $limit parameter)
 4. Use ONLY read operations (MATCH, RETURN, WHERE, ORDER BY, LIMIT, WITH)
-5. For name matching, use toLower() for case-insensitive comparison
+5. For person name matching, ALWAYS use case-insensitive comparison with toLower()
 6. NO write operations: CREATE, MERGE, SET, DELETE, REMOVE, DROP, CALL apoc.*, CALL dbms.* are FORBIDDEN
+
+SAFE NAME-MATCHING PATTERNS (REQUIRED for person queries):
+When matching person names (students, staff, case workers), use this pattern:
+WITH toLower($person_name) AS normalized_name
+MATCH (p:PersonLabel)
+WHERE toLower(p.fullName) = normalized_name OR toLower(p.name) = normalized_name
+
+Alternative single-line pattern:
+WHERE toLower(p.fullName) = toLower($person_name) OR toLower(p.name) = toLower($person_name)
 
 PARAMETERIZATION EXAMPLES:
 ✅ GOOD: WHERE toLower(s.fullName) = toLower($student_name)
+✅ GOOD: WHERE toLower(s.fullName) = toLower($student_name) OR toLower(s.name) = toLower($student_name)
+✅ GOOD: WITH toLower($student_name) AS q MATCH (s:Student) WHERE toLower(s.fullName) = q
 ❌ BAD: WHERE s.fullName = 'John Doe'
+❌ BAD: WHERE s.fullName = $student_name (missing toLower)
 
 ✅ GOOD: LIMIT $limit
 ❌ BAD: LIMIT 20
 
-EXAMPLE VALID QUERY:
-MATCH (s:Student {{fullName: $student_name}})-[:HAS_PLAN]->(:Plan)-[:HAS_GOAL]->(g:Goal)
-WHERE toLower(s.fullName) = toLower($student_name)
+EXAMPLE VALID QUERY WITH SAFE NAME MATCHING:
+MATCH (s:Student)-[:HAS_PLAN]->(:Plan)-[:HAS_GOAL]->(g:Goal)
+WHERE toLower(s.fullName) = toLower($student_name) OR toLower(s.name) = toLower($student_name)
 RETURN g.title AS goal, coalesce(g.status, '') AS status
 ORDER BY g.title
 LIMIT $limit

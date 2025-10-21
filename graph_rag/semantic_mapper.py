@@ -19,6 +19,54 @@ from opentelemetry.trace import get_current_span
 logger = get_logger(__name__)
 
 
+def normalize_person_name(name: str) -> str:
+    """
+    Normalize a person name by stripping common honorifics and trimming whitespace.
+    
+    This function handles common honorifics (Ms., Mrs., Mr., Dr., etc.) and ensures
+    consistent name formatting for person-based queries.
+    
+    Args:
+        name: Raw person name (e.g., "Ms. Garcia", "DR. SMITH", "mr. brooks")
+        
+    Returns:
+        Normalized name with honorifics removed and whitespace trimmed
+        
+    Examples:
+        "Ms. Garcia" -> "Garcia"
+        "DR. SMITH" -> "SMITH" 
+        "mr. brooks" -> "brooks"
+        "Mrs. Rosa Garcia" -> "Rosa Garcia"
+        "Dr. John Smith Jr." -> "John Smith Jr."
+    """
+    if not name or not name.strip():
+        return ""
+    
+    # Common honorifics to remove (case-insensitive)
+    honorifics = [
+        r'^mr\.?\s+', r'^mrs\.?\s+', r'^ms\.?\s+', r'^miss\.?\s+',
+        r'^dr\.?\s+', r'^prof\.?\s+', r'^professor\.?\s+',
+        r'^sir\.?\s+', r'^madam\.?\s+', r'^madame\.?\s+',
+        r'^rev\.?\s+', r'^reverend\.?\s+', r'^father\.?\s+',
+        r'^captain\.?\s+', r'^capt\.?\s+', r'^lieutenant\.?\s+',
+        r'^sergeant\.?\s+', r'^sgt\.?\s+', r'^colonel\.?\s+',
+        r'^general\.?\s+', r'^admiral\.?\s+', r'^major\.?\s+',
+        r'^lt\.?\s+', r'^col\.?\s+', r'^gen\.?\s+', r'^adm\.?\s+'
+    ]
+    
+    normalized_name = name.strip()
+    
+    # Remove honorifics (case-insensitive)
+    for honorific_pattern in honorifics:
+        normalized_name = re.sub(honorific_pattern, '', normalized_name, flags=re.IGNORECASE)
+    
+    # Clean up any extra whitespace
+    normalized_name = re.sub(r'\s+', ' ', normalized_name.strip())
+    
+    logger.debug(f"Name normalization: '{name}' -> '{normalized_name}'")
+    return normalized_name
+
+
 def _normalize_term(term: str) -> str:
     """Normalize term for comparison: lowercase, trim, remove extra spaces"""
     return re.sub(r'\s+', ' ', term.strip().lower())

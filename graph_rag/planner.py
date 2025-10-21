@@ -45,21 +45,40 @@ class QueryPlan(BaseModel):
 
 def _extract_student_name(question: str) -> str | None:
     """
-    Extract student name from a question using pattern matching.
+    Extract student name from a question using pattern matching and normalize it.
     
     Args:
         question: User question text
         
     Returns:
-        Student name if found, None otherwise
+        Normalized student name if found, None otherwise
     """
     if not question or not isinstance(question, str):
         return None
     
     # Look for names after "for" keyword (including titles like Dr., Mr., etc.)
-    for_match = re.search(r'\bfor\s+([A-Z][a-z]*\.?\s+[A-Z][a-z]+(?:[-][A-Z][a-z]+)*(?:\s+[A-Z][a-z]+)*)', question)
+    for_match = re.search(r'\bfor\s+([A-Z][a-z]*\.?\s*[A-Z][a-z]+(?:[-][A-Z][a-z]+)*(?:\s+[A-Z][a-z]+)*(?:\s+[A-Z][a-z]*\.?)*)', question, re.IGNORECASE)
     if for_match:
-        return for_match.group(1)
+        raw_name = for_match.group(1)
+        # Normalize the extracted name to remove honorifics
+        from graph_rag.semantic_mapper import normalize_person_name
+        return normalize_person_name(raw_name)
+    
+    # Look for names after "of" keyword (e.g., "Goals of Dr. Brooks")
+    of_match = re.search(r'\bof\s+([A-Z][a-z]*\.?\s*[A-Z][a-z]+(?:[-][A-Z][a-z]+)*(?:\s+[A-Z][a-z]+)*(?:\s+[A-Z][a-z]*\.?)*)', question, re.IGNORECASE)
+    if of_match:
+        raw_name = of_match.group(1)
+        # Normalize the extracted name to remove honorifics
+        from graph_rag.semantic_mapper import normalize_person_name
+        return normalize_person_name(raw_name)
+    
+    # Look for names after "manager for" (e.g., "Case manager for mr. brooks")
+    manager_match = re.search(r'\bmanager\s+for\s+([A-Z][a-z]*\.?\s*[A-Z][a-z]+(?:[-][A-Z][a-z]+)*(?:\s+[A-Z][a-z]+)*(?:\s+[A-Z][a-z]*\.?)*)', question, re.IGNORECASE)
+    if manager_match:
+        raw_name = manager_match.group(1)
+        # Normalize the extracted name to remove honorifics
+        from graph_rag.semantic_mapper import normalize_person_name
+        return normalize_person_name(raw_name)
     
     # Fallback: look for any capitalized words that might be names
     student_name_patterns = [
@@ -70,7 +89,10 @@ def _extract_student_name(question: str) -> str | None:
         matches = re.findall(pattern, question)
         if matches:
             # Take the longest match (most likely to be a full name)
-            return max(matches, key=len)
+            raw_name = max(matches, key=len)
+            # Normalize the extracted name to remove honorifics
+            from graph_rag.semantic_mapper import normalize_person_name
+            return normalize_person_name(raw_name)
     
     return None
 
@@ -358,6 +380,21 @@ Respond with your classification:"""
         anchor_entity = None
         candidate_entity = None
         
+        # Normalize person names in parameters (student names, staff names, etc.)
+        from graph_rag.semantic_mapper import normalize_person_name
+        normalized_params = {}
+        for key, value in planner_output.params.items():
+            if isinstance(value, str) and key in ['student_name', 'staff_name', 'student', 'staff', 'person', 'case_worker', 'anchor', 'entity']:
+                # Normalize person names to remove honorifics
+                normalized_value = normalize_person_name(value)
+                normalized_params[key] = normalized_value
+                logger.debug(f"Normalized {key}: '{value}' -> '{normalized_value}'")
+            else:
+                normalized_params[key] = value
+        
+        # Update planner output with normalized params
+        planner_output.params = normalized_params
+        
         # Check common param keys for entity names (student support domain)
         for key in ['anchor', 'entity', 'student_name', 'staff_name', 'student', 'staff', 'person', 'case_worker']:
             if key in planner_output.params:
@@ -370,8 +407,10 @@ Respond with your classification:"""
                 entity_prompt = f"Extract student names, staff names, and case worker names from: {question}"
                 extracted = call_llm_structured(entity_prompt, ExtractedEntities)
                 if extracted.names:
-                    candidate_entity = extracted.names[0]
-                    logger.debug(f"Extracted entity from question: {candidate_entity}")
+                    raw_entity = extracted.names[0]
+                    # Normalize the extracted entity name
+                    candidate_entity = normalize_person_name(raw_entity)
+                    logger.debug(f"Extracted and normalized entity from question: '{raw_entity}' -> '{candidate_entity}'")
             except LLMStructuredError as e:
                 logger.warning(f"Entity extraction fallback failed: {e}")
         
