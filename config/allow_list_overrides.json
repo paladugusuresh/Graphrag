@@ -1,0 +1,15 @@
+{
+  "relationships": [
+    "FOR_STUDENT",
+    "HAS_PLAN",
+    "HAS_GOAL",
+    "HAS_PROGRESS",
+    "USES_ACCOMMODATION",
+    "PROVIDED_BY",
+    "HAS_CONCERN",
+    "HAS_CASE_MANAGER",
+    "PARTICIPANT",
+    "PARTICIPATED_IN",
+    "HAS_IEP_DOCUMENT"
+  ]
+}

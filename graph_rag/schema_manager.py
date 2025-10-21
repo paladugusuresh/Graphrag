@@ -74,6 +74,140 @@ def load_synonyms_optional(path: str = "config/synonyms.json") -> Optional[Dict[
         return None
 
 
+def merge_allow_list_overrides(base_allow_list: Dict[str, Any], overrides: Dict[str, Any], live_schema_inspector: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Merge allow-list overrides with base allow-list, ensuring only live schema elements are included.
+    
+    This function intersects overrides with the live schema to prevent enabling labels/relationships/properties
+    that don't exist in the actual Neo4j database.
+    
+    Args:
+        base_allow_list: The base allow-list from Neo4j schema extraction
+        overrides: Override configuration from config/allow_list_overrides.json
+        live_schema_inspector: Live schema data (labels, relationship_types, properties)
+        
+    Returns:
+        Merged allow-list with overrides applied (only for elements that exist in live schema)
+    """
+    merged_allow_list = base_allow_list.copy()
+    
+    # Get live schema elements
+    live_labels = set(live_schema_inspector.get('node_labels', []))
+    live_relationships = set(live_schema_inspector.get('relationship_types', []))
+    live_properties = live_schema_inspector.get('properties', {})
+    
+    # Merge node labels
+    if 'node_labels' in overrides:
+        override_labels = set(overrides['node_labels'])
+        valid_labels = override_labels.intersection(live_labels)
+        invalid_labels = override_labels - live_labels
+        
+        if invalid_labels:
+            logger.warning(f"Skipping unknown node labels from overrides: {sorted(invalid_labels)}")
+        
+        if valid_labels:
+            merged_labels = set(merged_allow_list.get('node_labels', []))
+            merged_labels.update(valid_labels)
+            merged_allow_list['node_labels'] = sorted(merged_labels)
+            logger.info(f"Added {len(valid_labels)} valid node labels from overrides: {sorted(valid_labels)}")
+    
+    # Merge relationship types
+    if 'relationships' in overrides:
+        override_relationships = set(overrides['relationships'])
+        valid_relationships = override_relationships.intersection(live_relationships)
+        invalid_relationships = override_relationships - live_relationships
+        
+        if invalid_relationships:
+            logger.warning(f"Skipping unknown relationship types from overrides: {sorted(invalid_relationships)}")
+        
+        if valid_relationships:
+            merged_relationships = set(merged_allow_list.get('relationship_types', []))
+            merged_relationships.update(valid_relationships)
+            merged_allow_list['relationship_types'] = sorted(merged_relationships)
+            logger.info(f"Added {len(valid_relationships)} valid relationship types from overrides: {sorted(valid_relationships)}")
+    
+    # Merge properties (per label)
+    if 'properties' in overrides:
+        override_properties = overrides['properties']
+        merged_properties = merged_allow_list.get('properties', {}).copy()
+        
+        for label, prop_list in override_properties.items():
+            if label not in live_labels:
+                logger.warning(f"Skipping properties for unknown label '{label}' from overrides")
+                continue
+            
+            override_props = set(prop_list)
+            live_props_for_label = set(live_properties.get(label, []))
+            valid_props = override_props.intersection(live_props_for_label)
+            invalid_props = override_props - live_props_for_label
+            
+            if invalid_props:
+                logger.warning(f"Skipping unknown properties for label '{label}' from overrides: {sorted(invalid_props)}")
+            
+            if valid_props:
+                existing_props = set(merged_properties.get(label, []))
+                existing_props.update(valid_props)
+                merged_properties[label] = sorted(existing_props)
+                logger.info(f"Added {len(valid_props)} valid properties for label '{label}' from overrides: {sorted(valid_props)}")
+        
+        merged_allow_list['properties'] = merged_properties
+    
+    return merged_allow_list
+
+
+def load_allow_list_overrides(path: str = "config/allow_list_overrides.json") -> Optional[Dict[str, Any]]:
+    """
+    Load allow-list overrides from JSON file if present, return None if missing/invalid.
+    
+    This is a non-blocking function that gracefully handles missing or malformed files.
+    
+    Args:
+        path: Path to the overrides JSON file
+        
+    Returns:
+        Dict with overrides structure: {"node_labels": [...], "relationships": [...], "properties": {...}}
+        None if file is missing, invalid, or cannot be read
+        
+    Expected JSON structure:
+        {
+            "node_labels": ["Student", "Staff", "Goal"],
+            "relationships": ["FOR_STUDENT", "HAS_PLAN", "HAS_GOAL"],
+            "properties": {
+                "Student": ["fullName", "dateTime"],
+                "Staff": ["title", "department"]
+            }
+        }
+    """
+    try:
+        if not os.path.exists(path):
+            logger.debug(f"Allow-list overrides file not found: {path}")
+            return None
+        
+        with open(path, 'r', encoding='utf-8') as f:
+            overrides = json.load(f)
+        
+        # Validate structure
+        if not isinstance(overrides, dict):
+            logger.warning(f"Allow-list overrides file {path} contains invalid structure: expected dict, got {type(overrides)}")
+            return None
+        
+        # Count overrides for debug logging
+        labels_count = len(overrides.get('node_labels', []))
+        relationships_count = len(overrides.get('relationships', []))
+        properties_count = sum(len(props) for props in overrides.get('properties', {}).values())
+        
+        logger.debug(f"Loaded allow-list overrides (labels:{labels_count}, rels:{relationships_count}, props:{properties_count})")
+        
+        return overrides
+        
+    except json.JSONDecodeError as e:
+        logger.warning(f"Allow-list overrides file {path} contains invalid JSON: {e}")
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to load allow-list overrides from {path}: {e}")
+        return None
+
+
 def _is_write_allowed() -> bool:
     """
     Check if schema writes are allowed based on APP_MODE and ALLOW_WRITES env vars.
@@ -205,7 +339,22 @@ def ensure_schema_loaded(force: bool = False) -> Dict[str, Any]:
     try:
         logger.info("Generating schema allow list from database")
         from graph_rag.schema_catalog import generate_schema_allow_list
-        allow_list = generate_schema_allow_list(allow_list_path)
+        base_allow_list = generate_schema_allow_list(allow_list_path=None, write_to_disk=False)
+        
+        # Load and merge overrides if present
+        overrides = load_allow_list_overrides("config/allow_list_overrides.json")
+        if overrides:
+            logger.info("Merging allow-list overrides with live schema")
+            allow_list = merge_allow_list_overrides(base_allow_list, overrides, base_allow_list)
+        else:
+            logger.debug("No allow-list overrides found, using base schema")
+            allow_list = base_allow_list
+        
+        # Write the final allow-list to disk
+        if allow_list_path:
+            with open(allow_list_path, 'w') as f:
+                json.dump(allow_list, f, indent=2)
+            logger.info(f"Allow-list written to {allow_list_path}")
         
         # Compute and write fingerprint
         fingerprint = _compute_fingerprint(allow_list)
