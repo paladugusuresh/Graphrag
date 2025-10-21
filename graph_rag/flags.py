@@ -152,6 +152,20 @@ def FORMATTERS_ENABLED() -> bool:
     return _get_bool_flag("FORMATTERS_ENABLED", "flags.formatters_enabled", False)
 
 
+def LLM_TOLERANT_JSON_PARSER() -> bool:
+    """
+    Whether to enable tolerant JSON parsing for LLM responses in development.
+    
+    This parser extracts JSON from text and normalizes common variations.
+    Only active when enabled - strict parsing in production.
+    
+    Default: False (current behavior - strict JSON parsing only)
+    Environment: LLM_TOLERANT_JSON_PARSER
+    Config: flags.llm_tolerant_json_parser
+    """
+    return _get_bool_flag("LLM_TOLERANT_JSON_PARSER", "flags.llm_tolerant_json_parser", False)
+
+
 def get_all_flags() -> dict[str, Union[bool, int]]:
     """
     Get all feature flags as a dictionary for logging/debugging.
@@ -169,4 +183,5 @@ def get_all_flags() -> dict[str, Union[bool, int]]:
         "RETRIEVAL_TOPK": RETRIEVAL_TOPK(),
         "MAPPER_ENABLED": MAPPER_ENABLED(),
         "FORMATTERS_ENABLED": FORMATTERS_ENABLED(),
+        "LLM_TOLERANT_JSON_PARSER": LLM_TOLERANT_JSON_PARSER(),
     }

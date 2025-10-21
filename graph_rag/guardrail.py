@@ -2,7 +2,10 @@
 from pydantic import BaseModel
 from graph_rag.llm_client import call_llm_structured, LLMStructuredError
 from graph_rag.sanitizer import sanitize_text
-from graph_rag.observability import get_logger, guardrail_blocks_total, create_pipeline_span, add_span_attributes
+from graph_rag.observability import (
+    get_logger, guardrail_blocks_total, guardrail_validation_errors_total,
+    guardrail_dev_bypass_total, create_pipeline_span, add_span_attributes
+)
 from graph_rag.audit_store import audit_store
 from graph_rag.flags import GUARDRAILS_FAIL_CLOSED_DEV
 from opentelemetry.trace import get_current_span
@@ -86,6 +89,9 @@ Respond with your classification:"""
         # Check if we should fail closed (production) or open (development)
         fail_closed = GUARDRAILS_FAIL_CLOSED_DEV()
         
+        # Record validation error metric
+        guardrail_validation_errors_total.labels(error_type="llm_structured_error").inc()
+        
         if fail_closed:
             # Production mode: Fail closed - block on LLM errors
             logger.error(f"Guardrail LLM classification failed (FAIL_CLOSED): {e}")
@@ -116,6 +122,9 @@ Respond with your classification:"""
             logger.warning(f"Guardrail LLM classification failed (FAIL_OPEN/DEV): {e}")
             logger.warning(f"Allowing question despite classification failure (DEV mode): {sanitized_question[:50]}...")
             
+            # Record dev bypass metric
+            guardrail_dev_bypass_total.labels(reason="llm_classification_error").inc()
+            
             add_span_attributes(span,
                 allowed=True,
                 reason="dev_mode_fail_open",
@@ -138,13 +147,17 @@ Respond with your classification:"""
         # Any other error - block for safety
         logger.error(f"Unexpected error in guardrail check: {e}")
         
+        # Record validation error metric
+        guardrail_validation_errors_total.labels(error_type="unexpected_error").inc()
+        
         # Audit log unexpected error
         audit_store.record({
-            "event": "guardrail_error",
-            "reason": "Unexpected error",
+            "event": "guardrail_unexpected_error",
+            "reason": "unexpected_exception",
             "error": str(e),
             "question_preview": sanitized_question[:100],
             "trace_id": trace_id
         })
-        
+        guardrail_blocks_total.labels(reason="unexpected_error").inc()
+        add_span_attributes(span, allowed=False, reason="unexpected_error", error=str(e))
         return False

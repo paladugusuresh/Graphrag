@@ -74,6 +74,31 @@ llm_rate_limited_total = Counter(
     "Total number of LLM rate limit hits"
 )
 
+# Guardrail Robustness Metrics
+guardrail_validation_errors_total = Counter(
+    "guardrail_validation_errors_total",
+    "Total number of guardrail validation errors",
+    ["error_type"]
+)
+
+guardrail_dev_bypass_total = Counter(
+    "guardrail_dev_bypass_total",
+    "Total number of guardrail dev mode bypasses",
+    ["reason"]
+)
+
+llm_json_parse_failures_total = Counter(
+    "llm_json_parse_failures_total",
+    "Total number of LLM JSON parse failures",
+    ["parser_type"]
+)
+
+llm_retry_attempts_total = Counter(
+    "llm_retry_attempts_total",
+    "Total number of LLM retry attempts",
+    ["retry_number"]
+)
+
 def start_metrics_server():
     port = int(os.getenv("PROMETHEUS_PORT", 8000))
     start_http_server(port)
