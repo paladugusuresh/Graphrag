@@ -247,7 +247,7 @@ def _validate_template_params(template_content: str, params: dict, intent: str) 
 
 def generate_cypher_with_llm(intent: str, params: dict, question: str) -> str:
     """
-    Generate Cypher query using LLM with strict parameterization enforcement.
+    Generate Cypher query using LLM with strict parameterization enforcement and dynamic schema hints.
     
     Args:
         intent: The intent name
@@ -262,37 +262,45 @@ def generate_cypher_with_llm(intent: str, params: dict, question: str) -> str:
     """
     from graph_rag.llm_client import call_llm_structured
     from graph_rag.audit_store import audit_store
+    from graph_rag.schema_manager import build_schema_hints
     
-    # Create a structured prompt that enforces parameterization
-    prompt = f"""You are a Cypher query generator for a Student Support graph database. Generate a safe, parameterized Cypher query.
+    # Get dynamic schema hints from allow-list
+    schema_hints = build_schema_hints(max_items_per_category=50)
+    
+    # Create a structured prompt that enforces parameterization with live schema
+    prompt = f"""You are a Cypher query generator for a Student Support graph database. Generate a safe, parameterized Cypher query using ONLY the allowed schema elements below.
 
-Intent: {intent}
-Question: {question}
-Parameters: {params}
+QUESTION: {question}
+INTENT: {intent}
+PARAMETERS AVAILABLE: {params}
+
+====== LIVE SCHEMA (USE ONLY THESE ELEMENTS) ======
+{schema_hints}
+====== END OF SCHEMA ======
 
 CRITICAL REQUIREMENTS:
 1. Use ONLY parameter placeholders ($param) for user data - NEVER use string literals
-2. Use ONLY labels and relationships from the allow-list
-3. Include LIMIT clause to prevent resource exhaustion
-4. Use only read operations (MATCH, RETURN, WHERE, ORDER BY, LIMIT)
-5. Validate all labels and relationships against the schema
+2. Use ONLY labels, relationships, and properties from the schema above
+3. Include LIMIT $limit clause in ALL queries (use provided $limit parameter)
+4. Use ONLY read operations (MATCH, RETURN, WHERE, ORDER BY, LIMIT, WITH)
+5. For name matching, use toLower() for case-insensitive comparison
+6. NO write operations: CREATE, MERGE, SET, DELETE, REMOVE, DROP, CALL apoc.*, CALL dbms.* are FORBIDDEN
 
-ALLOWED NODE LABELS: Student, Goal, Plan, Intervention, CaseWorker, Referral, Evaluation, Accommodation, ConcernArea
-ALLOWED RELATIONSHIPS: HAS_PLAN, HAS_GOAL, HAS_INTERVENTION, HAS_REFERRAL, HAS_EVALUATION, HAS_ACCOMMODATION, HAS_CONCERN, MANAGES_CASE
+PARAMETERIZATION EXAMPLES:
+✅ GOOD: WHERE toLower(s.fullName) = toLower($student_name)
+❌ BAD: WHERE s.fullName = 'John Doe'
 
-EXAMPLE GOOD QUERY:
+✅ GOOD: LIMIT $limit
+❌ BAD: LIMIT 20
+
+EXAMPLE VALID QUERY:
 MATCH (s:Student {{fullName: $student_name}})-[:HAS_PLAN]->(:Plan)-[:HAS_GOAL]->(g:Goal)
-RETURN g.title AS goal, g.status AS status
+WHERE toLower(s.fullName) = toLower($student_name)
+RETURN g.title AS goal, coalesce(g.status, '') AS status
 ORDER BY g.title
 LIMIT $limit
 
-EXAMPLE BAD QUERY (REJECTED):
-MATCH (s:Student {{fullName: 'John Doe'}})-[:HAS_PLAN]->(:Plan)-[:HAS_GOAL]->(g:Goal)
-RETURN g.title AS goal, g.status AS status
-ORDER BY g.title
-LIMIT 20
-
-Generate the Cypher query:"""
+Generate the Cypher query now (use ONLY the schema elements listed above):"""
 
     try:
         # Use a simple response model for Cypher generation

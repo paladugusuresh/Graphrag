@@ -424,6 +424,104 @@ def get_allow_list() -> Dict[str, Any]:
         raise
 
 
+def build_schema_hints(max_items_per_category: int = 50) -> str:
+    """
+    Build a concise text block summarizing the current Neo4j schema from the allow-list.
+    
+    This function constructs schema hints that can be injected into LLM prompts to guide
+    Cypher query generation, ensuring the LLM only uses valid schema elements.
+    
+    Args:
+        max_items_per_category: Maximum number of items to include per category (labels, rels, props)
+                                to prevent prompt bloat. Default is 50.
+    
+    Returns:
+        Formatted string containing schema hints with allowed labels, relationships, and properties
+        
+    Example output:
+        '''
+        ALLOWED NODE LABELS (use these for MATCH clauses):
+        - Student, Goal, Plan, Intervention, CaseWorker, Referral
+        
+        ALLOWED RELATIONSHIPS (use these for patterns):
+        - HAS_PLAN, HAS_GOAL, HAS_INTERVENTION, MANAGES_CASE
+        
+        ALLOWED PROPERTIES (use these for filtering/RETURN):
+        - Student: fullName, studentId, gradeLevel
+        - Goal: title, status, description
+        - Plan: planType, startDate, endDate
+        
+        NAME MATCHING GUIDELINES:
+        - Use toLower() for case-insensitive name matching
+        - Example: WHERE toLower(s.fullName) = toLower($student_name)
+        - Prefer 'fullName' property for Student names
+        '''
+    """
+    try:
+        allow_list = get_allow_list()
+        
+        # Extract schema components
+        node_labels = allow_list.get('node_labels', [])
+        relationship_types = allow_list.get('relationship_types', [])
+        properties = allow_list.get('properties', {})
+        
+        # Cap items to prevent prompt bloat
+        node_labels = node_labels[:max_items_per_category]
+        relationship_types = relationship_types[:max_items_per_category]
+        
+        # Build the schema hints text
+        hints = []
+        
+        # Node labels section
+        if node_labels:
+            hints.append("ALLOWED NODE LABELS (use these for MATCH clauses):")
+            hints.append(f"  {', '.join(node_labels)}")
+            hints.append("")
+        
+        # Relationship types section
+        if relationship_types:
+            hints.append("ALLOWED RELATIONSHIPS (use these for patterns):")
+            hints.append(f"  {', '.join(relationship_types)}")
+            hints.append("")
+        
+        # Properties section (grouped by label)
+        if properties:
+            hints.append("ALLOWED PROPERTIES (use these for filtering/RETURN):")
+            # Show properties for most important labels
+            important_labels = ['Student', 'Goal', 'Plan', 'Intervention', 'CaseWorker', 'Referral', 'Evaluation']
+            for label in important_labels:
+                if label in properties and label in node_labels:
+                    label_props = properties[label]
+                    # Cap properties per label
+                    if len(label_props) > 10:
+                        label_props = label_props[:10]
+                    hints.append(f"  - {label}: {', '.join(label_props)}")
+            hints.append("")
+        
+        # Add name matching guidelines
+        hints.append("NAME MATCHING GUIDELINES:")
+        hints.append("  - Use toLower() for case-insensitive name matching")
+        hints.append("  - Example: WHERE toLower(s.fullName) = toLower($student_name)")
+        if 'Student' in properties and 'fullName' in properties.get('Student', []):
+            hints.append("  - Prefer 'fullName' property for Student names")
+        hints.append("")
+        
+        schema_hints_text = "\n".join(hints)
+        
+        logger.debug(f"Built schema hints: {len(node_labels)} labels, {len(relationship_types)} relationships")
+        return schema_hints_text
+        
+    except Exception as e:
+        logger.error(f"Failed to build schema hints: {e}")
+        # Return a minimal fallback hint
+        return """
+SCHEMA HINTS UNAVAILABLE (using fallback):
+- Use standard Neo4j labels and relationships
+- Always parameterize values ($param)
+- Include LIMIT clause in all queries
+"""
+
+
 def _get_embedding_dimensions() -> Optional[int]:
     """
     Get embedding dimensions from the embedding provider.
