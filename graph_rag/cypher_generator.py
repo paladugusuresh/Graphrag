@@ -278,41 +278,67 @@ PARAMETERS AVAILABLE: {params}
 {schema_hints}
 ====== END OF SCHEMA ======
 
-CRITICAL REQUIREMENTS:
-1. Use ONLY parameter placeholders ($param) for user data - NEVER use string literals
-2. Use ONLY labels, relationships, and properties from the schema above
-3. Include LIMIT $limit clause in ALL queries (use provided $limit parameter)
-4. Use ONLY read operations (MATCH, RETURN, WHERE, ORDER BY, LIMIT, WITH)
-5. For person name matching, ALWAYS use case-insensitive comparison with toLower()
-6. NO write operations: CREATE, MERGE, SET, DELETE, REMOVE, DROP, CALL apoc.*, CALL dbms.* are FORBIDDEN
+CRITICAL SAFETY REQUIREMENTS (NON-NEGOTIABLE):
 
-SAFE NAME-MATCHING PATTERNS (REQUIRED for person queries):
-When matching person names (students, staff, case workers), use this pattern:
-WITH toLower($person_name) AS normalized_name
-MATCH (p:PersonLabel)
-WHERE toLower(p.fullName) = normalized_name OR toLower(p.name) = normalized_name
+1. READ-ONLY OPERATIONS ONLY:
+   ✅ ALLOWED: MATCH, OPTIONAL MATCH, RETURN, WHERE, ORDER BY, LIMIT, WITH, UNWIND, CASE, COALESCE
+   ❌ FORBIDDEN: CREATE, MERGE, SET, DELETE, REMOVE, DROP, CALL, LOAD CSV, FOREACH, INDEX, CONSTRAINT, apoc.*, dbms.*
 
-Alternative single-line pattern:
-WHERE toLower(p.fullName) = toLower($person_name) OR toLower(p.name) = toLower($person_name)
+2. MANDATORY PARAMETERIZATION:
+   ✅ ALL user data MUST use parameter placeholders ($param) - NEVER string literals
+   ✅ Example: WHERE toLower(s.fullName) = toLower($student_name)
+   ❌ NEVER: WHERE s.fullName = 'John Doe' or WHERE s.fullName = "{params.get('student_name')}"
+
+3. MANDATORY LIMIT CLAUSE:
+   ✅ EVERY query MUST end with LIMIT $limit
+   ✅ Use the provided $limit parameter from params
+   ❌ NEVER: LIMIT 20 or LIMIT 100 (hardcoded limits)
+
+4. CONSERVATIVE SCHEMA ADHERENCE:
+   ✅ Use ONLY labels, relationships, and properties from the schema above
+   ✅ When uncertain, use the most conservative valid query
+   ✅ Prefer direct matches over complex traversals
+   ❌ NEVER guess or invent new labels/relationships/properties
+
+5. SAFE NAME-MATCHING PATTERNS (REQUIRED for person queries):
+   ✅ ALWAYS use case-insensitive comparison with toLower() for person names
+   ✅ Pattern: WHERE toLower(p.fullName) = toLower($person_name) OR toLower(p.name) = toLower($person_name)
+   ✅ Alternative: WITH toLower($person_name) AS q MATCH (p:PersonLabel) WHERE toLower(p.fullName) = q
+   ❌ NEVER: WHERE p.fullName = $person_name (case-sensitive)
 
 PARAMETERIZATION EXAMPLES:
-✅ GOOD: WHERE toLower(s.fullName) = toLower($student_name)
-✅ GOOD: WHERE toLower(s.fullName) = toLower($student_name) OR toLower(s.name) = toLower($student_name)
-✅ GOOD: WITH toLower($student_name) AS q MATCH (s:Student) WHERE toLower(s.fullName) = q
-❌ BAD: WHERE s.fullName = 'John Doe'
-❌ BAD: WHERE s.fullName = $student_name (missing toLower)
+✅ CORRECT: WHERE toLower(s.fullName) = toLower($student_name)
+✅ CORRECT: WHERE toLower(s.fullName) = toLower($student_name) OR toLower(s.name) = toLower($student_name)
+✅ CORRECT: WITH toLower($student_name) AS q MATCH (s:Student) WHERE toLower(s.fullName) = q
+✅ CORRECT: LIMIT $limit
+❌ WRONG: WHERE s.fullName = 'John Doe'
+❌ WRONG: WHERE s.fullName = $student_name (missing toLower)
+❌ WRONG: LIMIT 20
 
-✅ GOOD: LIMIT $limit
-❌ BAD: LIMIT 20
+CONSERVATIVE SCHEMA ADHERENCE RULES:
+- NEVER guess or invent new labels, relationships, or properties
+- If uncertain about schema elements, use ONLY the most basic valid query
+- Prefer returning directly matched nodes over complex relationship traversals
+- When in doubt, use broader matches (e.g., all Students) rather than invalid syntax
+- If a specific property doesn't exist in schema, omit it rather than guessing
+- Use COALESCE() for optional properties to handle null values safely
+- Stick to simple patterns: MATCH (n:Label) WHERE condition RETURN n.property LIMIT $limit
 
-EXAMPLE VALID QUERY WITH SAFE NAME MATCHING:
+SAFE FALLBACK PATTERNS:
+✅ When uncertain about relationships: MATCH (n:Student) RETURN n.fullName LIMIT $limit
+✅ When uncertain about properties: MATCH (n:Student) RETURN n.fullName, coalesce(n.status, '') AS status LIMIT $limit
+✅ When uncertain about complex queries: Use simple direct matches only
+❌ NEVER: Inventing new labels like :Person when only :Student exists
+❌ NEVER: Using properties not in schema like n.title when only n.fullName exists
+
+EXAMPLE VALID QUERY WITH ALL SAFETY REQUIREMENTS:
 MATCH (s:Student)-[:HAS_PLAN]->(:Plan)-[:HAS_GOAL]->(g:Goal)
 WHERE toLower(s.fullName) = toLower($student_name) OR toLower(s.name) = toLower($student_name)
 RETURN g.title AS goal, coalesce(g.status, '') AS status
 ORDER BY g.title
 LIMIT $limit
 
-Generate the Cypher query now (use ONLY the schema elements listed above):"""
+Generate the Cypher query now (MUST pass all safety requirements above):"""
 
     try:
         # Use a simple response model for Cypher generation
@@ -333,6 +359,9 @@ Generate the Cypher query now (use ONLY the schema elements listed above):"""
         )
         
         cypher_query = response.cypher.strip()
+        
+        # Ensure LIMIT clause is present and parameterized
+        cypher_query, params = _ensure_limit_clause(cypher_query, params)
         
         # Validate the generated Cypher
         if not _validate_generated_cypher(cypher_query, params, intent):
@@ -363,9 +392,49 @@ Generate the Cypher query now (use ONLY the schema elements listed above):"""
         raise RuntimeError(error_msg) from e
 
 
+def _ensure_limit_clause(cypher: str, params: dict) -> tuple[str, dict]:
+    """
+    Ensure that the Cypher query has a LIMIT $limit clause.
+    If missing, automatically append it and add the limit parameter.
+    
+    Args:
+        cypher: Generated Cypher query
+        params: Parameters dictionary
+        
+    Returns:
+        Tuple of (modified_cypher, updated_params)
+    """
+    cypher_upper = cypher.upper()
+    
+    # Check if LIMIT is already present
+    if 'LIMIT' in cypher_upper:
+        # Check if it's using $limit parameter
+        if '$limit' in cypher:
+            return cypher, params
+        else:
+            # Replace hardcoded LIMIT with $limit parameter
+            limit_pattern = r'LIMIT\s+\d+'
+            modified_cypher = re.sub(limit_pattern, 'LIMIT $limit', cypher, flags=re.IGNORECASE)
+            return modified_cypher, params
+    
+    # No LIMIT clause found - append it
+    default_limit = get_config_value('cypher.default_limit', 20)
+    
+    # Ensure params has limit
+    if 'limit' not in params:
+        params = params.copy()
+        params['limit'] = default_limit
+    
+    # Append LIMIT clause
+    modified_cypher = cypher.rstrip() + f"\nLIMIT $limit"
+    
+    logger.debug(f"Added LIMIT $limit clause to Cypher query (default: {default_limit})")
+    return modified_cypher, params
+
+
 def _validate_generated_cypher(cypher: str, params: dict, intent: str) -> bool:
     """
-    Validate that generated Cypher uses proper parameterization and schema compliance.
+    Validate that generated Cypher uses proper parameterization, schema compliance, and safety rules.
     
     Args:
         cypher: Generated Cypher query
@@ -376,50 +445,95 @@ def _validate_generated_cypher(cypher: str, params: dict, intent: str) -> bool:
         True if Cypher is valid, False otherwise
     """
     try:
-        # Check for string literals (should use parameters instead)
+        # 1. Check for forbidden write operations
+        forbidden_keywords = [
+            'CREATE', 'MERGE', 'SET', 'DELETE', 'REMOVE', 'DROP', 
+            'CALL', 'LOAD CSV', 'FOREACH', 'INDEX', 'CONSTRAINT'
+        ]
+        
+        cypher_upper = cypher.upper()
+        for keyword in forbidden_keywords:
+            if keyword in cypher_upper:
+                logger.warning(f"Generated Cypher for intent '{intent}' contains forbidden keyword: {keyword}")
+                return False
+        
+        # Check for apoc.* and dbms.* procedures
+        if 'APOC.' in cypher_upper or 'DBMS.' in cypher_upper:
+            logger.warning(f"Generated Cypher for intent '{intent}' contains forbidden procedures (apoc.* or dbms.*)")
+            return False
+        
+        # 2. Check for string literals (should use parameters instead)
         string_literal_pattern = r"['\"][^'\"]*['\"]"
         literals = re.findall(string_literal_pattern, cypher)
         
-        # Filter out allowed literals (empty strings, numbers, etc.)
+        # Filter out allowed literals (empty strings, numbers, keywords)
+        allowed_literals = {
+            '""', "''", '"0"', '"1"', '"true"', '"false"', '"asc"', '"desc"',
+            '"ascending"', '"descending"', '"null"', '"NULL"'
+        }
+        
         problematic_literals = []
         for literal in literals:
-            # Allow empty strings, numbers, and common keywords
-            if literal not in ['""', "''", '"0"', '"1"', '"true"', '"false"', '"asc"', '"desc"']:
+            if literal not in allowed_literals:
                 # Check if this looks like user data (names, etc.)
-                if len(literal) > 2 and not literal.replace('"', '').replace("'", '').isdigit():
+                clean_literal = literal.replace('"', '').replace("'", '')
+                if len(clean_literal) > 2 and not clean_literal.isdigit():
                     problematic_literals.append(literal)
         
         if problematic_literals:
             logger.warning(f"Generated Cypher for intent '{intent}' contains string literals: {problematic_literals}")
             return False
         
-        # Check for required parameters
+        # 3. Check for mandatory LIMIT clause
+        if 'LIMIT' not in cypher_upper:
+            logger.warning(f"Generated Cypher for intent '{intent}' missing mandatory LIMIT clause")
+            return False
+        
+        # Check that LIMIT uses parameter, not hardcoded value
+        limit_pattern = r'LIMIT\s+(\d+)'
+        hardcoded_limits = re.findall(limit_pattern, cypher_upper)
+        if hardcoded_limits:
+            logger.warning(f"Generated Cypher for intent '{intent}' uses hardcoded LIMIT: {hardcoded_limits}")
+            return False
+        
+        # 4. Check for required parameters
         param_pattern = r'\$(\w+)'
         used_params = set(re.findall(param_pattern, cypher))
-        provided_params = set(params.keys())
         
-        # Check if all used parameters are provided
-        missing_params = used_params - provided_params
-        if missing_params:
-            logger.warning(f"Generated Cypher for intent '{intent}' uses undefined parameters: {missing_params}")
+        # Check that $limit parameter is used
+        if 'limit' not in used_params:
+            logger.warning(f"Generated Cypher for intent '{intent}' doesn't use $limit parameter")
             return False
         
-        # Basic safety checks
-        cypher_upper = cypher.upper()
-        write_operations = ['CREATE', 'DELETE', 'SET', 'REMOVE', 'MERGE', 'DROP']
-        for op in write_operations:
-            if op in cypher_upper:
-                logger.warning(f"Generated Cypher for intent '{intent}' contains write operation '{op}'")
+        # 5. Check for safe name-matching patterns (case-insensitive)
+        # Look for person name comparisons that might be case-sensitive
+        person_name_patterns = [
+            r'WHERE\s+\w+\.(?:fullName|name)\s*=\s*\$\w+',  # Case-sensitive comparison
+            r'WHERE\s+\w+\.(?:fullName|name)\s*=\s*["\'][^"\']*["\']'  # String literal comparison
+        ]
+        
+        for pattern in person_name_patterns:
+            matches = re.findall(pattern, cypher, re.IGNORECASE)
+            if matches:
+                logger.warning(f"Generated Cypher for intent '{intent}' may have unsafe name matching: {matches}")
                 return False
         
-        # Check for LIMIT clause
-        if 'LIMIT' not in cypher_upper:
-            logger.warning(f"Generated Cypher for intent '{intent}' missing LIMIT clause")
-            return False
+        # 6. Check for conservative schema adherence (basic check)
+        # Look for obvious non-schema elements (this is a basic check, validator does detailed validation)
+        suspicious_patterns = [
+            r':\w*[a-z]\w*',  # Lowercase labels (should be PascalCase)
+            r'\[:\w*[a-z]\w*\]',  # Lowercase relationship types (should be UPPER_CASE)
+        ]
         
-        logger.debug(f"Generated Cypher validation passed for intent: {intent}")
+        for pattern in suspicious_patterns:
+            matches = re.findall(pattern, cypher)
+            if matches:
+                logger.warning(f"Generated Cypher for intent '{intent}' may contain non-standard schema elements: {matches}")
+                # Don't fail here, just warn - let the validator do detailed checking
+        
+        logger.debug(f"Generated Cypher for intent '{intent}' passed all safety validations")
         return True
         
     except Exception as e:
-        logger.error(f"Generated Cypher validation error for intent '{intent}': {e}")
+        logger.error(f"Error validating generated Cypher for intent '{intent}': {e}")
         return False
