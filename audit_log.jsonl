@@ -27,3 +27,4 @@
 {"event": "cypher_validation_failed", "reason": "unbounded_traversal_detected", "depth_cap": 2, "pattern": "[*2..]", "cypher_preview": "MATCH (n)-[*2..]-(m) RETURN n, m"}
 {"event": "cypher_validation_failed", "reason": "unbounded_traversal_detected", "depth_cap": 2, "pattern": "[:KNOWS*1..]", "cypher_preview": "MATCH (n)-[:KNOWS*1..]-(m) RETURN n, m"}
 {"event": "cypher_validation_failed", "reason": "traversal_depth_exceeds_limit", "depth_cap": 2, "requested_depth": "5", "pattern": "[:ENROLLED_IN*..5]", "cypher_preview": "MATCH (n:Student)-[:ENROLLED_IN*..5]->(c:Course) RETURN n, c"}
+{"event": "llm_rate_limit_exceeded", "endpoint": "test_endpoint", "model": "test-model", "rate_limit": 1, "trace_id": null}

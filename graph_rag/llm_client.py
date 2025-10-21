@@ -8,7 +8,8 @@ from graph_rag.observability import get_logger, tracer, llm_calls_total
 from graph_rag.audit_store import audit_store
 from graph_rag.config_manager import get_config_value
 from graph_rag.dev_stubs import get_redis_client as get_redis_client_stub
-from graph_rag.flags import LLM_JSON_MODE_ENABLED
+from graph_rag.flags import LLM_JSON_MODE_ENABLED, LLM_RATE_LIMIT_PER_MIN
+from graph_rag.rate_limit import rate_limited_llm, RateLimitExceeded
 from opentelemetry.trace import get_current_span
 
 logger = get_logger(__name__)
@@ -121,6 +122,7 @@ def consume_token(key=RATE_LIMIT_KEY, tokens=1) -> bool:
 class LLMStructuredError(Exception):
     pass
 
+@rate_limited_llm(endpoint_name="call_llm_raw")
 def call_llm_raw(prompt: str, model: str, max_tokens: int = 512, temperature: float = 0.0, json_mode: bool = False) -> str:
     """
     Call Gemini LLM with the given prompt.
@@ -187,6 +189,8 @@ def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None,
     - Sets temperature=0 for deterministic results
     - Retries up to 2 times on validation failures
     
+    Rate limiting is enforced at the call_llm_raw level via @rate_limited_llm decorator.
+    
     Args:
         prompt: The base prompt to send to the LLM
         schema_model: Pydantic model class for validation
@@ -194,9 +198,6 @@ def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None,
         max_tokens: Maximum tokens for response (defaults to config)
         example_structure: Optional example structure to include in prompt
     """
-    if not consume_token():
-        raise LLMStructuredError("LLM rate limit exceeded")
-
     model = model or get_config_value('llm.model', 'gemini-2.0-flash-exp')
     max_tokens = max_tokens or get_config_value('llm.max_tokens', 512)
     
@@ -212,6 +213,7 @@ def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None,
     for attempt in range(max_retries + 1):
         try:
             # Call LLM with JSON mode if enabled
+            # Note: Rate limiting is enforced by @rate_limited_llm decorator on call_llm_raw
             response = call_llm_raw(
                 structured_prompt, 
                 model=model, 
@@ -272,7 +274,11 @@ def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None,
                     "trace_id": str(span.context.trace_id) if span and span.is_recording() else None
                 })
                 raise LLMStructuredError("Structured output failed validation") from e
-                
+        
+        except RateLimitExceeded as e:
+            # Convert rate limit error to LLMStructuredError (don't retry rate limits)
+            logger.error(f"Rate limit exceeded: {e}")
+            raise LLMStructuredError(str(e)) from e
         except LLMStructuredError:
             # Re-raise LLMStructuredError immediately (don't retry)
             raise
