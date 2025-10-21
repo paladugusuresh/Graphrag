@@ -146,10 +146,70 @@ class Neo4jClient:
                 raise RuntimeError("Neo4j driver not initialized")
         
         def _run(tx):
-            return tx.run(query, **(params or {}), timeout=timeout).data()
+            result = tx.run(query, **(params or {}), timeout=timeout)
+            records = result.data()
+            
+            # Capture and log Neo4j notifications
+            if hasattr(result, 'consume'):
+                summary = result.consume()
+                if hasattr(summary, 'notifications') and summary.notifications:
+                    self._log_neo4j_notifications(summary.notifications, query, query_name)
+            
+            return records
         
         with self._driver.session() as session:
             return session.execute_read(_run)  # true READ transaction
+    
+    def _log_neo4j_notifications(self, notifications, query: str, query_name: str):
+        """Log Neo4j notifications with actionable hints"""
+        for notification in notifications:
+            severity = getattr(notification, 'severity', 'UNKNOWN')
+            code = getattr(notification, 'code', 'UNKNOWN')
+            title = getattr(notification, 'title', 'Unknown notification')
+            description = getattr(notification, 'description', '')
+            
+            # Build actionable hints based on notification code
+            hints = []
+            if 'UnknownProperty' in code or 'property' in description.lower():
+                # Extract property name from description if possible
+                import re
+                prop_match = re.search(r"property[:\s]+['\"]?(\w+)['\"]?", description, re.IGNORECASE)
+                if prop_match:
+                    prop_name = prop_match.group(1)
+                    hints.append(f"Property '{prop_name}' not found. Check allow-list and schema.")
+                else:
+                    hints.append("Property not found. Check allow-list and schema.")
+            elif 'UnknownLabel' in code or 'label' in description.lower():
+                hints.append("Label not found. Check allow-list and schema.")
+            elif 'UnknownRelationship' in code or 'relationship' in description.lower():
+                hints.append("Relationship type not found. Check allow-list and schema.")
+            elif 'Cartesian' in code:
+                hints.append("Cartesian product detected. Consider adding relationship patterns or WHERE clauses.")
+            elif 'EagerOperator' in code:
+                hints.append("Query requires eager loading. Consider optimizing query pattern.")
+            
+            # Log notification with hints
+            log_level = 'warning' if severity in ['WARNING', 'INFORMATION'] else 'error'
+            log_message = f"Neo4j notification [{severity}] {code}: {title}"
+            if hints:
+                log_message += f" - Hint: {'; '.join(hints)}"
+            
+            if log_level == 'warning':
+                logger.warning(log_message)
+            else:
+                logger.error(log_message)
+            
+            # Record in audit store
+            self._audit_store.record({
+                "event": "neo4j_notification",
+                "query_name": query_name,
+                "query_preview": query[:200],
+                "severity": severity,
+                "code": code,
+                "title": title,
+                "description": description,
+                "hints": hints
+            })
 
     def execute_write_query(self, query: str, params: dict | None = None, timeout: float | None = None, query_name: str | None = None):
         """Execute a write query using Neo4j's write transaction API"""

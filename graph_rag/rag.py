@@ -25,6 +25,57 @@ from graph_rag.formatters import formatters_manager
 
 logger = get_logger(__name__)
 
+def _build_error_response(
+    question: str,
+    error_message: str,
+    trace_id: str,
+    error_code: str = None,
+    error_details: Dict[str, Any] = None,
+    audit_id: str = None,
+    cypher: str = None,
+    params: Dict[str, Any] = None
+) -> Dict[str, Any]:
+    """
+    Build a structured error response for failed queries.
+    
+    Args:
+        question: Original user question
+        error_message: Clean user-visible error message
+        trace_id: Trace ID for debugging
+        error_code: Machine-readable error code (e.g., "unknown_property", "max_hops_exceeded")
+        error_details: Detailed error information for developers
+        audit_id: Audit log entry ID
+        cypher: Generated Cypher query (if available)
+        params: Query parameters (if available)
+        
+    Returns:
+        Structured error response dictionary
+    """
+    response = {
+        "question": question,
+        "error": error_message,
+        "trace_id": trace_id
+    }
+    
+    if error_code:
+        response["error_code"] = error_code
+    
+    if error_details:
+        # Provide detailed error information for developers
+        response["error_details"] = error_details
+    
+    if audit_id:
+        response["audit_id"] = audit_id
+    
+    if cypher:
+        response["cypher"] = cypher
+    
+    if params:
+        response["params"] = params
+    
+    return response
+
+
 class RAGChain:
     def __init__(self):
         """Initialize RAG chain with new LLM-driven pipeline"""
@@ -268,18 +319,29 @@ Generate the Cypher query now:"""
                         
                     except LLMStructuredError as e:
                         logger.error(f"Cypher generation failed: {e}")
-                        audit_store.record({
+                        
+                        # Extract error details from LLMStructuredError if available
+                        error_details = getattr(e, 'error_details', {})
+                        error_code = error_details.get('error_code', 'cypher_generation_failed')
+                        
+                        # Record audit entry
+                        audit_id = audit_store.record({
                             "event_type": "cypher_generation_failed",
                             "trace_id": trace_id,
                             "question": question,
-                            "error": str(e)
+                            "error": str(e),
+                            "error_code": error_code,
+                            "error_details": error_details
                         })
-                        return {
-                            "question": question,
-                            "error": "Failed to generate query",
-                            "error_details": str(e),
-                            "trace_id": trace_id
-                        }
+                        
+                        return _build_error_response(
+                            question=question,
+                            error_message="Failed to generate query",
+                            trace_id=trace_id,
+                            error_code=error_code,
+                            error_details={"reason": str(e), **error_details},
+                            audit_id=audit_id
+                        )
                 
                 # Step 3: Validate Cypher
                 with create_pipeline_span("rag.validate_cypher") as validate_span:
@@ -292,20 +354,54 @@ Generate the Cypher query now:"""
                     
                     if not is_valid:
                         logger.warning(f"Cypher validation failed: {validation_details}")
-                        audit_store.record({
+                        
+                        # Extract error code and build machine-readable hints
+                        error_code = validation_details.get("blocked_reason") or "validation_failed"
+                        
+                        # Build developer-friendly hints
+                        hints = []
+                        if validation_details.get("invalid_properties"):
+                            props = validation_details["invalid_properties"]
+                            hints.append(f"Unknown properties: {', '.join(props)}. Check allow-list and schema.")
+                        if validation_details.get("invalid_labels"):
+                            labels = validation_details["invalid_labels"]
+                            hints.append(f"Unknown labels: {', '.join(labels)}. Check allow-list and schema.")
+                        if validation_details.get("invalid_relationships"):
+                            rels = validation_details["invalid_relationships"]
+                            hints.append(f"Unknown relationships: {', '.join(rels)}. Check allow-list and schema.")
+                        if "max_hops" in error_code or "unbounded" in error_code:
+                            hints.append(f"Traversal exceeds depth cap. Use simpler patterns or increase MAX_HOPS.")
+                        if "limit" in error_code:
+                            hints.append(f"Query missing or exceeds LIMIT. Ensure LIMIT $limit is present.")
+                        
+                        # Build error details for developers
+                        error_details = {
+                            "validation_details": validation_details,
+                            "hints": hints,
+                            "cypher_preview": cypher_output.cypher[:200]
+                        }
+                        
+                        # Record audit entry
+                        audit_id = audit_store.record({
                             "event_type": "cypher_validation_failed",
                             "trace_id": trace_id,
                             "question": question,
                             "cypher": cypher_output.cypher,
-                            "validation_details": validation_details
-                        })
-                        return {
-                            "question": question,
-                            "error": "Generated query failed validation",
+                            "error_code": error_code,
                             "validation_details": validation_details,
-                            "cypher": cypher_output.cypher,
-                            "trace_id": trace_id
-                        }
+                            "hints": hints
+                        })
+                        
+                        return _build_error_response(
+                            question=question,
+                            error_message="Invalid query",
+                            trace_id=trace_id,
+                            error_code=error_code,
+                            error_details=error_details,
+                            audit_id=audit_id,
+                            cypher=cypher_output.cypher,
+                            params=cypher_output.params
+                        )
                 
                 # Step 4: Execute query safely
                 with create_pipeline_span("rag.execute_query") as exec_span:
@@ -324,21 +420,53 @@ Generate the Cypher query now:"""
                         
                     except Exception as e:
                         logger.error(f"Query execution failed: {e}")
-                        audit_store.record({
+                        
+                        # Parse error message for specific error codes
+                        error_str = str(e).lower()
+                        if 'timeout' in error_str:
+                            error_code = 'query_timeout'
+                            hints = ["Query exceeded timeout limit. Consider simplifying the query or increasing timeout."]
+                        elif 'property' in error_str and 'not found' in error_str:
+                            error_code = 'unknown_property'
+                            hints = ["Property not found on node. Check allow-list and schema."]
+                        elif 'label' in error_str or 'node' in error_str:
+                            error_code = 'schema_error'
+                            hints = ["Schema mismatch. Verify labels and relationships in allow-list."]
+                        elif 'memory' in error_str or 'resource' in error_str:
+                            error_code = 'resource_exhaustion'
+                            hints = ["Query consumed too many resources. Add LIMIT or simplify traversal."]
+                        else:
+                            error_code = 'execution_failed'
+                            hints = []
+                        
+                        # Build error details
+                        error_details = {
+                            "reason": str(e),
+                            "hints": hints,
+                            "cypher_preview": cypher_output.cypher[:200]
+                        }
+                        
+                        # Record audit entry
+                        audit_id = audit_store.record({
                             "event_type": "query_execution_failed",
                             "trace_id": trace_id,
                             "question": question,
                             "cypher": cypher_output.cypher,
-                            "error": str(e)
+                            "error": str(e),
+                            "error_code": error_code,
+                            "hints": hints
                         })
-                        return {
-                            "question": question,
-                            "error": "Query execution failed",
-                            "error_details": str(e),
-                            "cypher": cypher_output.cypher,
-                            "params": cypher_output.params,
-                            "trace_id": trace_id
-                        }
+                        
+                        return _build_error_response(
+                            question=question,
+                            error_message="Query execution failed",
+                            trace_id=trace_id,
+                            error_code=error_code,
+                            error_details=error_details,
+                            audit_id=audit_id,
+                            cypher=cypher_output.cypher,
+                            params=cypher_output.params
+                        )
                 
                 # Step 5: Augment with graph context
                 with create_pipeline_span("rag.augment_results") as aug_span:
