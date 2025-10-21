@@ -31,6 +31,18 @@ def generate_schema_allow_list(output_path: str = None, write_to_disk: bool = Tr
             name = node.get('name')
             prop_rows = client.execute_read_query(f"MATCH (n:`{name}`) UNWIND keys(n) AS key RETURN DISTINCT key")
             properties[name] = [p['key'] for p in prop_rows]
+        
+        # Ensure Goal.goalType and Goal.id are always included
+        if 'Goal' in properties:
+            goal_props = set(properties['Goal'])
+            if 'goalType' not in goal_props:
+                goal_props.add('goalType')
+                logger.info("Added 'goalType' to Goal properties in allow-list")
+            if 'id' not in goal_props:
+                goal_props.add('id')
+                logger.info("Added 'id' to Goal properties in allow-list")
+            properties['Goal'] = sorted(list(goal_props))
+        
         allow = {"node_labels": labels, "relationship_types": rels, "properties": properties}
         
         if write_to_disk and output_path:

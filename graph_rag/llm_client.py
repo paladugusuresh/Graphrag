@@ -121,7 +121,10 @@ def consume_token(key=RATE_LIMIT_KEY, tokens=1) -> bool:
     return result == 1
 
 class LLMStructuredError(Exception):
-    pass
+    """Exception raised when LLM structured output fails validation."""
+    def __init__(self, message: str, error_details: dict = None):
+        super().__init__(message)
+        self.error_details = error_details or {}
 
 @rate_limited_llm(endpoint_name="call_llm_raw")
 def call_llm_raw(prompt: str, model: str, max_tokens: int = 512, temperature: float = 0.0, json_mode: bool = False) -> str:
@@ -181,6 +184,59 @@ def call_llm_raw(prompt: str, model: str, max_tokens: int = 512, temperature: fl
         logger.error(f"Gemini API call failed: {e}")
         # Return a safe default for graceful degradation
         return '{"intent":"general_rag_query","anchor":null}'
+
+def _compute_schema_diff(parsed_data: dict, schema_model: BaseModel) -> dict:
+    """
+    Compute a concise diff of missing/extra keys vs. required schema.
+    
+    Args:
+        parsed_data: Parsed JSON data from LLM
+        schema_model: Pydantic model class for validation
+        
+    Returns:
+        Dict with 'missing', 'extra', and 'message' keys
+    """
+    # Get required fields from schema
+    required_fields = set()
+    optional_fields = set()
+    
+    if hasattr(schema_model, 'model_fields'):
+        # Pydantic v2
+        for field_name, field_info in schema_model.model_fields.items():
+            if field_info.is_required():
+                required_fields.add(field_name)
+            else:
+                optional_fields.add(field_name)
+    else:
+        # Pydantic v1
+        for field_name, field in schema_model.__fields__.items():
+            if field.required:
+                required_fields.add(field_name)
+            else:
+                optional_fields.add(field_name)
+    
+    # Get actual fields from parsed data
+    actual_fields = set(parsed_data.keys())
+    
+    # Compute diff
+    missing = required_fields - actual_fields
+    extra = actual_fields - (required_fields | optional_fields)
+    
+    # Build concise message
+    diff_parts = []
+    if missing:
+        diff_parts.append(f"missing required fields: {', '.join(sorted(missing))}")
+    if extra:
+        diff_parts.append(f"extra fields: {', '.join(sorted(extra))}")
+    
+    message = "; ".join(diff_parts) if diff_parts else "schema mismatch"
+    
+    return {
+        "missing": list(sorted(missing)),
+        "extra": list(sorted(extra)),
+        "message": message
+    }
+
 
 def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None, max_tokens: int = None, example_structure: str = None, force_json_mode: bool = False, force_temperature_zero: bool = False):
     """
@@ -272,8 +328,32 @@ def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None,
                     logger.info(f"LLM structured call succeeded on attempt {attempt + 1}/{max_retries + 1}")
                 return validated
             except ValidationError as e:
+                # Compute schema diff for better error messages and retry logic
+                schema_diff = None
+                if isinstance(parsed, dict):
+                    schema_diff = _compute_schema_diff(parsed, schema_model)
+                
                 if attempt < max_retries:
-                    logger.warning(f"LLM output failed validation (attempt {attempt + 1}/{max_retries + 1}), retrying...")
+                    logger.warning(f"LLM output failed validation (attempt {attempt + 1}/{max_retries + 1}), retrying with self-critique...")
+                    
+                    # Log diff for audit
+                    if schema_diff:
+                        logger.warning(f"Schema diff: {schema_diff['message']}")
+                        audit_store.record(entry={
+                            "type": "planner_json_diff",
+                            "attempt": attempt + 1,
+                            "missing_fields": schema_diff['missing'],
+                            "extra_fields": schema_diff['extra'],
+                            "diff_message": schema_diff['message'],
+                            "schema_model": schema_model.__name__,
+                            "trace_id": str(get_current_span().context.trace_id) if get_current_span() and get_current_span().is_recording() else None
+                        })
+                    
+                    # Build self-critique retry prompt with diff
+                    if schema_diff and (schema_diff['missing'] or schema_diff['extra']):
+                        critique_message = f"\n\nYour previous response had schema issues: {schema_diff['message']}. Please correct this and return the exact JSON structure required."
+                        structured_prompt = _build_structured_prompt(prompt + critique_message, schema_model, example_structure)
+                    
                     # Log redacted raw body on first validation failure
                     if attempt == 0:
                         redacted_preview = redact_sensitive_content(response, max_length=200)
@@ -282,10 +362,13 @@ def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None,
                     last_error = e
                     continue
                 
+                # Final attempt failed
                 logger.warning(f"LLM output failed validation for schema {schema_model.__name__}: {e}")
                 span = get_current_span()
                 redacted_response = redact_sensitive_content(response)
-                audit_store.record(entry={
+                
+                # Build structured error details
+                error_details = {
                     "type": "llm_validation_failed", 
                     "prompt": structured_prompt[:200],  # Truncate prompt for audit
                     "response": redacted_response, 
@@ -294,8 +377,20 @@ def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None,
                     "attempts": attempt + 1,
                     "tolerant_parser_enabled": tolerant_parser_enabled,
                     "trace_id": str(span.context.trace_id) if span and span.is_recording() else None
-                })
-                raise LLMStructuredError("Structured output failed validation") from e
+                }
+                
+                # Add schema diff to error details
+                if schema_diff:
+                    error_details["schema_diff"] = schema_diff
+                    error_details["diff_message"] = schema_diff['message']
+                
+                # Record audit entry with trace_id
+                audit_id = audit_store.record(entry=error_details)
+                error_details["audit_id"] = audit_id
+                
+                # Raise structured error with trace and audit context
+                error_msg = f"Structured output failed validation: {schema_diff['message'] if schema_diff else str(e)}"
+                raise LLMStructuredError(error_msg, error_details=error_details) from e
         
         except RateLimitExceeded as e:
             # Convert rate limit error to LLMStructuredError (don't retry rate limits)

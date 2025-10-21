@@ -354,7 +354,15 @@ Guidelines:
 
 Example intents: "student_intervention_query", "student_goal_query", "student_referral_query", "student_progress_query", "case_management_query", "student_support_query", "general_query"
 
-Respond with your classification:"""
+CRITICAL: Your response MUST be a valid JSON object with exactly these three fields (no more, no less):
+{{"intent": "student_goal_query", "params": {{"student_name": "John Doe"}}, "confidence": 0.95}}
+
+Required JSON structure:
+- "intent": string (one of the intent labels above)
+- "params": object (dictionary of extracted parameters, can be empty {{}})
+- "confidence": number (float between 0.0 and 1.0)
+
+Respond with your classification (strict JSON only):"""
 
     try:
         # Use planner-specific model from config
