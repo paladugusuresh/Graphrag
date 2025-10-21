@@ -132,9 +132,30 @@ class Neo4jClient:
                 inflight_queries.dec()
 
     def execute_read_query(self, query: str, params: dict | None = None, timeout: float | None = None, query_name: str | None = None):
-        return self._execute_query(query, params=params, access_mode="READ", timeout=timeout, query_name=query_name)
+        """Execute a read query using Neo4j's read transaction API"""
+        params = params or {}
+        query_name = query_name or "generic_query"
+        
+        # Check if driver is available
+        if not self._driver:
+            dev_mode = os.getenv("DEV_MODE", "").lower() in ("true", "1", "yes")
+            if dev_mode:
+                logger.warning(f"Neo4j driver not available in DEV_MODE, returning empty result for query: {query_name}")
+                return []
+            else:
+                raise RuntimeError("Neo4j driver not initialized")
+        
+        def _run(tx):
+            return tx.run(query, **(params or {}), timeout=timeout).data()
+        
+        with self._driver.session() as session:
+            return session.execute_read(_run)  # true READ transaction
 
     def execute_write_query(self, query: str, params: dict | None = None, timeout: float | None = None, query_name: str | None = None):
+        """Execute a write query using Neo4j's write transaction API"""
+        params = params or {}
+        query_name = query_name or "generic_query"
+        
         # Write-protection guard: disallow writes unless admin mode or explicit env var
         if os.getenv("APP_MODE", "read_only").lower() != "admin" and os.getenv("ALLOW_WRITES","false").lower() not in ("1","true","yes"):
             error_msg = "Write queries disabled in application run mode. Set APP_MODE=admin or ALLOW_WRITES=true to permit writes."
@@ -152,5 +173,17 @@ class Neo4jClient:
             
             raise RuntimeError(error_msg)
         
-        # write only used by ingestion/admin flows
-        return self._execute_query(query, params=params, access_mode="WRITE", timeout=timeout, query_name=query_name)
+        # Check if driver is available
+        if not self._driver:
+            dev_mode = os.getenv("DEV_MODE", "").lower() in ("true", "1", "yes")
+            if dev_mode:
+                logger.warning(f"Neo4j driver not available in DEV_MODE, returning empty result for query: {query_name}")
+                return []
+            else:
+                raise RuntimeError("Neo4j driver not initialized")
+        
+        def _run(tx):
+            return tx.run(query, **(params or {}), timeout=timeout).data()
+        
+        with self._driver.session() as session:
+            return session.execute_write(_run)  # true WRITE transaction
