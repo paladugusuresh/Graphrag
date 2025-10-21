@@ -297,10 +297,11 @@ Generate the Cypher query:"""
     try:
         # Use a simple response model for Cypher generation
         from pydantic import BaseModel
+        from typing import Optional
         
         class CypherResponse(BaseModel):
             cypher: str = Field(description="Generated Cypher query")
-            explanation: str = Field(description="Brief explanation of the query")
+            explanation: Optional[str] = Field(default="", description="Brief explanation of the query (optional)")
         
         response = call_llm_structured(
             prompt=prompt,

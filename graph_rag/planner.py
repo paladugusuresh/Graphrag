@@ -106,8 +106,9 @@ def _map_question_to_template_intent(question: str) -> str | None:
         r'\b([A-Z][a-z]+)\b',              # Single name
     ]
     
-    # Rule 1: Goals for student (flexible patterns)
-    if (re.search(r'\bgoals?\b.*\bfor\b', question_lower) or 
+    # Rule 1: Goals for/of student (flexible patterns)
+    # Matches: "goals for", "goals of", "goal for", "goal of"
+    if (re.search(r'\bgoals?\b.*\b(for|of)\b', question_lower) or 
         re.search(r'\bgoals?\b.*\bdoes\b', question_lower) or
         re.search(r'\bgoals?\b.*\bhave\b', question_lower)):
         logger.debug(f"Matched 'goals' pattern in question: {question[:50]}...")
