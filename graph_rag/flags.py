@@ -119,6 +119,17 @@ def RETRIEVAL_CHUNK_EMBEDDINGS_ENABLED() -> bool:
     return _get_bool_flag("RETRIEVAL_CHUNK_EMBEDDINGS_ENABLED", "flags.retrieval_chunk_embeddings_enabled", False)
 
 
+def RETRIEVAL_TOPK() -> int:
+    """
+    Number of top chunks to retrieve via vector similarity.
+    
+    Default: 5 (current behavior)
+    Environment: RETRIEVAL_TOPK
+    Config: flags.retrieval_topk
+    """
+    return _get_int_flag("RETRIEVAL_TOPK", "flags.retrieval_topk", 5)
+
+
 def MAPPER_ENABLED() -> bool:
     """
     Whether to enable SynonymMapper for semantic term mapping.
@@ -144,5 +155,6 @@ def get_all_flags() -> dict[str, Union[bool, int]]:
         "GUARDRAILS_MAX_HOPS": GUARDRAILS_MAX_HOPS(),
         "SCHEMA_BOOTSTRAP_ENABLED": SCHEMA_BOOTSTRAP_ENABLED(),
         "RETRIEVAL_CHUNK_EMBEDDINGS_ENABLED": RETRIEVAL_CHUNK_EMBEDDINGS_ENABLED(),
+        "RETRIEVAL_TOPK": RETRIEVAL_TOPK(),
         "MAPPER_ENABLED": MAPPER_ENABLED(),
     }
