@@ -5,7 +5,7 @@ Provides read-only query execution with timeout and limit enforcement.
 """
 import os
 from typing import List, Dict, Any, Optional
-from graph_rag.observability import get_logger
+from graph_rag.observability import get_logger, executor_latency_seconds, create_pipeline_span, add_span_attributes
 from graph_rag.config_manager import get_config_value
 from graph_rag.neo4j_client import Neo4jClient
 from graph_rag.audit_store import audit_store
@@ -33,21 +33,26 @@ def safe_execute(cypher: str, params: Dict[str, Any] = None, timeout: int = None
     Raises:
         RuntimeError: If query execution fails or violates safety constraints
     """
-    if not cypher or not cypher.strip():
-        logger.warning("Empty Cypher query provided for execution")
-        audit_store.record({
-            "event": "query_execution_failed",
-            "reason": "empty_query",
-            "cypher_preview": "",
-            "error": "Empty query provided"
-        })
-        raise RuntimeError("Empty Cypher query provided")
     
-    # Ensure read-only mode
-    app_mode = os.getenv("APP_MODE", "read_only").lower()
-    if app_mode not in ["read_only", "admin"]:
-        logger.warning(f"Query execution attempted in non-read-only mode: {app_mode}")
-        audit_store.record({
+    with create_pipeline_span("executor.safe_execute", 
+                              cypher_preview=cypher[:100], 
+                              timeout_ms=timeout * 1000 if timeout else None) as span:
+        with executor_latency_seconds.time():
+            if not cypher or not cypher.strip():
+                logger.warning("Empty Cypher query provided for execution")
+                audit_store.record({
+                    "event": "query_execution_failed",
+                    "reason": "empty_query",
+                    "cypher_preview": "",
+                    "error": "Empty query provided"
+                })
+                raise RuntimeError("Empty Cypher query provided")
+            
+            # Ensure read-only mode
+            app_mode = os.getenv("APP_MODE", "read_only").lower()
+            if app_mode not in ["read_only", "admin"]:
+                logger.warning(f"Query execution attempted in non-read-only mode: {app_mode}")
+                audit_store.record({
             "event": "query_execution_blocked",
             "reason": "non_read_only_mode",
             "app_mode": app_mode,
@@ -89,6 +94,13 @@ def safe_execute(cypher: str, params: Dict[str, Any] = None, timeout: int = None
         # Log successful execution
         result_count = len(results) if results else 0
         logger.info(f"Query executed successfully, returned {result_count} results")
+        
+        add_span_attributes(span,
+            result_count=result_count,
+            timeout_ms=execution_timeout * 1000,
+            limit_applied=max_results if 'LIMIT' not in cypher_upper else None,
+            app_mode=app_mode
+        )
         
         # Record successful execution in audit log
         audit_store.record({

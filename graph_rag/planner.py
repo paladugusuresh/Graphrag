@@ -5,7 +5,7 @@ The planner extracts intent and entities (students, staff, interventions, goals)
 Aligned with Student, Goal, InterventionPlan, Referral, and CaseWorker entities.
 """
 from pydantic import BaseModel, Field
-from graph_rag.observability import get_logger, tracer
+from graph_rag.observability import get_logger, tracer, planner_latency_seconds, mapping_similarity, create_pipeline_span, add_span_attributes
 from graph_rag.llm_client import call_llm_structured, LLMStructuredError
 from graph_rag.cypher_generator import validate_label, load_allow_list
 from graph_rag.semantic_mapper import map_term, get_best_match, SynonymMapper
@@ -84,6 +84,9 @@ def _find_best_anchor_entity_semantic(candidate: str) -> str | None:
                     "method": method
                 })
                 
+                # Record mapping similarity metric
+                mapping_similarity.observe(score)
+                
                 # Validate the canonical term is in allow_list
                 allow_list = load_allow_list()
                 if validate_label(canonical_id, allow_list) != "`Entity`":  # Check if it's not the fallback
@@ -148,7 +151,9 @@ def generate_plan(question: str) -> QueryPlan:
         QueryPlan with intent, anchor_entity, and params
     """
     
-    # Create prompt for LLM-driven intent classification (Student Support domain)
+    with create_pipeline_span("planner.generate_plan", question=question[:100]) as span:
+        with planner_latency_seconds.time():
+            # Create prompt for LLM-driven intent classification (Student Support domain)
     prompt = f"""You are a query planner for a Student Support graph database system. Your task is to analyze the user question and identify the query intent with appropriate parameters.
 
 User Question: "{question}"
@@ -188,6 +193,12 @@ Respond with your classification:"""
         
         logger.info(f"LLM Planner - Intent: {planner_output.intent}, Confidence: {planner_output.confidence}")
         
+        add_span_attributes(span, 
+            intent=planner_output.intent,
+            confidence=planner_output.confidence,
+            planner_model=planner_model
+        )
+        
         # Extract anchor entity from params
         anchor_entity = None
         candidate_entity = None
@@ -219,6 +230,12 @@ Respond with your classification:"""
                 # Fall back to the original extracted entity
                 anchor_entity = candidate_entity
                 logger.info(f"No semantic mapping found, using original entity: {anchor_entity}")
+        
+        add_span_attributes(span,
+            candidate_entity=candidate_entity,
+            anchor_entity=anchor_entity,
+            params_count=len(planner_output.params)
+        )
         
         return QueryPlan(
             intent=planner_output.intent,

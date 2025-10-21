@@ -9,7 +9,7 @@ import json
 from typing import Optional, List, Dict, Any
 from graph_rag.planner import generate_plan
 from graph_rag.retriever import Retriever
-from graph_rag.observability import get_logger, tracer
+from graph_rag.observability import get_logger, tracer, create_pipeline_span, add_span_attributes
 from opentelemetry.trace import get_current_span
 from graph_rag.audit_store import audit_store
 from graph_rag.llm_client import call_llm_structured, LLMStructuredError
@@ -145,20 +145,24 @@ Generate the Cypher query now:"""
         6. Generate summary via LLM
         7. Return comprehensive response
         """
-        with tracer.start_as_current_span("rag.invoke") as span:
+        with create_pipeline_span("rag.invoke", question=question[:100]) as span:
             current_span = get_current_span()
             trace_id = f"{current_span.context.trace_id:032x}" if current_span and current_span.context.is_valid else "no-trace"
             
             try:
                 # Step 1: Generate plan
-                with tracer.start_as_current_span("rag.generate_plan"):
+                with create_pipeline_span("rag.generate_plan") as plan_span:
                     plan = generate_plan(question)
+                    add_span_attributes(plan_span,
+                        intent=plan.intent,
+                        anchor_entity=plan.anchor_entity or "none"
+                    )
                     span.set_attribute("plan.intent", plan.intent)
                     span.set_attribute("plan.anchor_entity", plan.anchor_entity or "none")
                     logger.info(f"Plan generated: intent={plan.intent}, anchor={plan.anchor_entity}")
                 
                 # Step 2: Generate Cypher via LLM
-                with tracer.start_as_current_span("rag.generate_cypher") as cypher_span:
+                with create_pipeline_span("rag.generate_cypher") as cypher_span:
                     try:
                         allow_list = get_allow_list()
                         cypher_prompt = self._build_cypher_generation_prompt(plan, allow_list)
@@ -168,6 +172,10 @@ Generate the Cypher query now:"""
                             schema_model=CypherGenerationOutput
                         )
                         
+                        add_span_attributes(cypher_span,
+                            cypher_generated=cypher_output.cypher[:100],
+                            params_count=len(cypher_output.params)
+                        )
                         cypher_span.set_attribute("cypher_generated", cypher_output.cypher[:100])
                         logger.info(f"Cypher generated: {cypher_output.cypher[:100]}...")
                         
@@ -187,8 +195,13 @@ Generate the Cypher query now:"""
                         }
                 
                 # Step 3: Validate Cypher
-                with tracer.start_as_current_span("rag.validate_cypher"):
+                with create_pipeline_span("rag.validate_cypher") as validate_span:
                     is_valid, validation_details = validate_cypher(cypher_output.cypher)
+                    
+                    add_span_attributes(validate_span,
+                        is_valid=is_valid,
+                        validation_details=validation_details
+                    )
                     
                     if not is_valid:
                         logger.warning(f"Cypher validation failed: {validation_details}")
@@ -208,13 +221,17 @@ Generate the Cypher query now:"""
                         }
                 
                 # Step 4: Execute query safely
-                with tracer.start_as_current_span("rag.execute_query") as exec_span:
+                with create_pipeline_span("rag.execute_query") as exec_span:
                     try:
                         primary_rows = safe_execute(
                             cypher=cypher_output.cypher,
                             params=cypher_output.params
                         )
                         
+                        add_span_attributes(exec_span,
+                            rows_returned=len(primary_rows),
+                            result_count=len(primary_rows)
+                        )
                         exec_span.set_attribute("rows_returned", len(primary_rows))
                         logger.info(f"Query executed successfully: {len(primary_rows)} rows returned")
                         
@@ -237,7 +254,7 @@ Generate the Cypher query now:"""
                         }
                 
                 # Step 5: Augment with graph context
-                with tracer.start_as_current_span("rag.augment_results") as aug_span:
+                with create_pipeline_span("rag.augment_results") as aug_span:
                     primary_ids = self._extract_primary_ids(primary_rows)
                     aug_span.set_attribute("primary_ids_count", len(primary_ids))
                     
@@ -255,7 +272,7 @@ Generate the Cypher query now:"""
                         logger.info("No primary IDs extracted; skipping augmentation")
                 
                 # Step 6: Generate summary via LLM
-                with tracer.start_as_current_span("rag.generate_summary"):
+                with create_pipeline_span("rag.generate_summary") as summary_span:
                     try:
                         # Prepare snippets dict for prompt
                         snippets_dict = {s.get('id', f"node_{i}"): s.get('text', '')[:200] for i, s in enumerate(snippets[:5])}
@@ -275,6 +292,12 @@ Generate the Cypher query now:"""
                         summary = summary_output.summary
                         citations = summary_output.citations
                         table = summary_output.table
+                        
+                        add_span_attributes(summary_span,
+                            summary_length=len(summary),
+                            citations_count=len(citations),
+                            snippets_count=len(snippets_dict)
+                        )
                         
                         logger.info(f"Summary generated: {len(summary)} chars, {len(citations)} citations")
                         
@@ -322,6 +345,14 @@ Generate the Cypher query now:"""
                     response["formatted"] = formatting_result["formatted"]
                     response["verification_status"] = formatting_result["verification_status"]
                     response["citation_details"] = formatting_result["citation_details"]
+                
+                # Add final pipeline attributes
+                add_span_attributes(span,
+                    total_rows=len(primary_rows),
+                    total_snippets=len(snippets),
+                    total_citations=len(citations),
+                    pipeline_success=True
+                )
                 
                 logger.info(f"RAG pipeline completed successfully for question: {question}")
                 return response

@@ -2,7 +2,7 @@
 from pydantic import BaseModel
 from graph_rag.llm_client import call_llm_structured, LLMStructuredError
 from graph_rag.sanitizer import sanitize_text
-from graph_rag.observability import get_logger
+from graph_rag.observability import get_logger, guardrail_blocks_total, create_pipeline_span, add_span_attributes
 from graph_rag.audit_store import audit_store
 from graph_rag.flags import GUARDRAILS_FAIL_CLOSED_DEV
 from opentelemetry.trace import get_current_span
@@ -23,10 +23,12 @@ def guardrail_check(question: str) -> bool:
     Returns:
         True if the question is allowed, False if it should be blocked
     """
-    # Ensure the input is sanitized before sending to LLM
-    sanitized_question = sanitize_text(question)
     
-    # Construct a short classification prompt
+    with create_pipeline_span("guardrail.check", question=question[:100]) as span:
+        # Ensure the input is sanitized before sending to LLM
+        sanitized_question = sanitize_text(question)
+        
+        # Construct a short classification prompt
     prompt = f"""You are a security classifier. Analyze the following user question and determine if it should be allowed or blocked.
 
 Block requests that:
@@ -62,8 +64,15 @@ Respond with your classification:"""
         
         logger.info(f"Guardrail check - Question: {sanitized_question[:50]}... | Allowed: {response.allowed} | Reason: {response.reason}")
         
+        add_span_attributes(span,
+            allowed=response.allowed,
+            reason=response.reason,
+            sanitized_question=sanitized_question[:100]
+        )
+        
         # Audit log if blocked
         if not response.allowed:
+            guardrail_blocks_total.labels(reason=response.reason).inc()
             audit_store.record({
                 "event": "guardrail_blocked",
                 "reason": response.reason,
@@ -82,6 +91,15 @@ Respond with your classification:"""
             logger.error(f"Guardrail LLM classification failed (FAIL_CLOSED): {e}")
             logger.warning(f"Blocking question due to classification failure: {sanitized_question[:50]}...")
             
+            guardrail_blocks_total.labels(reason="llm_classification_error").inc()
+            
+            add_span_attributes(span,
+                allowed=False,
+                reason="llm_classification_error",
+                fail_mode="closed",
+                error=str(e)
+            )
+            
             # Audit log the classification failure
             audit_store.record({
                 "event": "guardrail_classification_failed",
@@ -97,6 +115,13 @@ Respond with your classification:"""
             # Development mode: Fail open - allow on LLM errors with warning
             logger.warning(f"Guardrail LLM classification failed (FAIL_OPEN/DEV): {e}")
             logger.warning(f"Allowing question despite classification failure (DEV mode): {sanitized_question[:50]}...")
+            
+            add_span_attributes(span,
+                allowed=True,
+                reason="dev_mode_fail_open",
+                fail_mode="open",
+                error=str(e)
+            )
             
             # Audit log the classification failure with allow action
             audit_store.record({

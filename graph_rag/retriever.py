@@ -1,5 +1,5 @@
 # graph_rag/retriever.py
-from graph_rag.observability import get_logger, tracer
+from graph_rag.observability import get_logger, tracer, augmentation_size, create_pipeline_span, add_span_attributes
 from graph_rag.neo4j_client import Neo4jClient # Import the class, not the instance
 from graph_rag.embeddings import get_embedding_provider # Import the getter function
 from graph_rag.cypher_generator import validate_label, validate_relationship_type, load_allow_list
@@ -139,7 +139,9 @@ class Retriever:
             return rows
 
     def retrieve_context(self, plan):
-        with tracer.start_as_current_span("retriever.retrieve_context"):
+        with create_pipeline_span("retriever.retrieve_context", 
+                                  intent=plan.intent,
+                                  anchor_entity=plan.anchor_entity) as span:
             structured = self._get_structured_context(plan)
             
             # Get initial chunks via vector similarity (if enabled) or empty list
@@ -148,9 +150,18 @@ class Retriever:
             # Expand with graph neighbors (bounded by max_traversal_depth)
             expanded = self._expand_with_hierarchy(initial_chunks)
             
+            # Record augmentation size metric
+            augmentation_size.observe(len(expanded))
+            
             # Merge vector results with graph-neighbor context
             # The expanded results already include the initial chunks plus their neighbors
             unstructured_text = "\n\n".join([f"[{r['id']}]\n{r['text']}" for r in expanded])
+            
+            add_span_attributes(span,
+                vector_chunks_count=len(initial_chunks),
+                total_chunks=len(expanded),
+                augmentation_size=len(expanded)
+            )
             
             return {
                 "structured": structured, 
