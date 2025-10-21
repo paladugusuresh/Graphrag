@@ -1,0 +1,139 @@
+1.0 Introduction 
+This document outlines the solution requirements for an AI Agent using a Graph 
+Database. The project aims to develop an intelligent web application that enables end 
+users to interact with a Neo4j GraphRAG through a natural language (NL) conversational 
+chatbot. The system will leverage Natural Language Processing (NLP), embedding 
+similarity, and a Graph RAG (Retrieval-Augmented Generation) approach to convert user 
+queries into validated Cypher queries, providing structured, contextual, and secure 
+responses. 
+
+2.0 Project Objectives 
+The primary goal is to build a robust and user-friendly platform that makes complex graph 
+data accessible to a broad audience. The key objectives are: 
+• Provide a Conversational Interface: Offer a chatbot that allows users to ask 
+questions in natural, human-like language. 
+• Intelligent Query Translation: Accurately convert user's natural language 
+questions into valid and safe Cypher queries. 
+• Deliver Rich, Contextual Responses: Present query results in structured formats 
+(tabular, graph, etc.), augmented with summaries, citations, and explanations.
+
+3.0 Scope of Work 
+The scope of this project encompasses the entire pipeline, from user interaction to data 
+retrieval and response generation. The following components are in scope: 
+3.1 Chatbot & User Interface 
+The front-end will feature a conversational chatbot interface capable of displaying different 
+types of query results. 
+• Conversational Chatbot: The core interface for user interaction. 
+• Structured Result Views: Support for displaying results in multiple formats, 
+including tabular data, network graphs, and free-text summaries. 
+3.2 Natural Language Understanding (NLU) 
+The system will process and interpret user queries to understand their intent and the 
+entities they are referencing. 
+• User Query Ingestion: Accepts and processes natural language questions from the 
+user. 
+• Semantic Mapping: Uses embeddings and heuristic matching to map user
+provided terms (e.g., "products," "customers") to the correct Neo4j schema terms 
+(e.g., node labels, relationship types, property names). 
+3.3 Schema Catalog & Embeddings 
+A critical part of the NLU process involves a pre-built knowledge base of the graph schema. 
+• Allow-Listed Graph Schema: The system will maintain a strict catalog of the Neo4j 
+schema, including labels, relationships, property names, and their data types. 
+• Embedding Generation: A pipeline will generate and store vector embeddings for 
+all schema terms and potential synonyms, which will be used for similarity search. 
+3.4 Query Generation 
+The system's intelligence is rooted in its ability to securely and accurately create Cypher 
+queries. 
+• Validated Cypher Generation: Convert NL queries into a parameterized, validated 
+Cypher query. 
+• Security & Constraints: Enforce strict adherence to the allow-listed schema to 
+prevent unauthorized or malicious queries. All generated queries will be restricted 
+to the predefined data model. 
+3.5 Execution & Response 
+This phase covers the execution of the generated query and the post-processing of the 
+results. 
+• Cypher Execution: The system will execute the generated Cypher query against the 
+Neo4j database. 
+• GraphRAG Augmentation: Results will be enriched by fetching adjacent nodes, 
+related documents, and snippets to provide context. 
+• LLM Integration: A large language model (LLM) will be used to generate a 
+contextual summary and explanation of the structured results. 
+• Structured Output: The final response will include the structured data view and an 
+optional textual summary with citations linking back to the source data. 
+3.6 Guardrails & Observability 
+To ensure reliability and security, the system will include robust monitoring and control 
+mechanisms. 
+• System Guardrails: Implement safeguards such as query timeouts, graph 
+traversal depth limits, and a strict read-only execution mode to prevent data 
+modification. 
+• Observability: Comprehensive logging, monitoring, and dashboards will be 
+implemented to track key metrics like query latency, error rates, and embedding 
+match scores. 
+
+4.0 Functional Requirements 
+4.1 User Features 
+• Chat Interface with History: The application shall provide a continuous 
+conversation history for the user. 
+• Interaction Options: Users shall have the ability to rephrase questions or drill down 
+into details from a previous response. 
+• Output Formats: The system shall display results in multiple formats: 
+o Tabular: For simple, structured data. 
+o Graph View: To visualize relationships between nodes. 
+o Plain Text: For contextual summaries and explanations. 
+• Contextual Information: The system shall provide citations and contextual 
+explanations alongside the core data. 
+• User Feedback: Users shall be able to provide feedback on the accuracy of the 
+answer (e.g., a "thumbs up/down" or rating). 
+4.2 System Features 
+• Automated Schema Ingestion: The system shall automatically ingest and parse 
+the schema from the Neo4j database. 
+• Synonym Expansion: The system shall support synonym expansion and leverage 
+embedding similarity for accurate term mapping. 
+• Parameterized Queries: The system shall generate parameterized Cypher queries 
+to prevent Cypher injection attacks. 
+• GraphRAG Integration: The system shall augment query results with related data 
+points to provide context for the LLM. 
+• Monitoring & Metrics: The system shall track and expose metrics for query latency, 
+error rates, and the quality of embedding matches. 
+
+5.0 Technical Requirements 
+5.1 Application Architecture 
+• Frontend: The user interface will be built using React. 
+• Backend: The business logic and API layer will be implemented in Python or .NET. 
+• Database: Neo4j will serve as the primary graph database. 
+• Vector Store: Vector embeddings will be stored and managed using Neo4j's native 
+vector index or an external vector store. 
+• LLM Integration: The system will integrate with a pre-selected LLM provider (e.g., 
+OpenAI/GPT) for summarization and query generation. 
+5.2 Schema Management 
+• Schema Extraction: The system shall include an automated process to extract the 
+graph schema directly from Neo4j. 
+• Allow-Listed Schema: The extracted schema will be stored as an allow-list, serving 
+as the single source of truth for query generation. 
+• Embedding Pipeline: An automated pipeline will generate and update embeddings 
+for schema elements and their synonyms, ensuring the NLU model remains current 
+with the graph data model. 
+5.3 Query Processing Pipeline 
+The user query will follow a well-defined pipeline: 
+1. NL Query Input: User submits a natural language question. 
+2. Semantic Search: An embedding similarity search combined with heuristics 
+matches NL terms to the allow-listed schema. 
+3. Cypher Generation: The system constructs a parameterized Cypher query based 
+on the matched schema terms and query intent. 
+4. Guardrail Enforcement: The query is checked against guardrails for safety (e.g., 
+traversal depth, read-only mode). 
+5. Cypher Execution: The query is executed against the Neo4j database. 
+6. GraphRAG Augmentation: Results are retrieved and enriched with additional 
+contextual information from the graph. 
+7. LLM Summarization: The LLM receives the structured results and augmented 
+context to generate a natural language summary. 
+8. Response Delivery: A final, structured response with optional summaries and 
+citations is returned to the user. 
+5.4 Security & Governance 
+• Read-Only Execution: All queries executed by the AI agent will be read-only (no 
+writes or mutations) to protect data integrity. 
+• Input Validation: All user inputs will be sanitized and validated to prevent malicious 
+input. 
+• Observability: The system will implement detailed logging and monitoring for audit 
+trails of all user queries and system responses. 
+• Audit Trail: A complete record of all user queries, generated Cypher, and system 
+responses will be maintained for auditing and debugging

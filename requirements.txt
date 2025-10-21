@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+neo4j
+python-dotenv
+google-generativeai
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http
+opentelemetry-exporter-otlp-proto-grpc
+prometheus-client
+redis
+structlog
+pydantic
+pytest
+pytest-mock

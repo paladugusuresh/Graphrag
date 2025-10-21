@@ -1,0 +1,28 @@
+---
+alwaysApply: false
+---
+When adding startup wiring in main.py: call ensure_schema_loaded() then upsert_schema_embeddings() inside lifespan(); wrap in try/except and audit failures. Why: downstream components need embeddings available.
+
+When creating schema_manager.py: implement fingerprinting .schema_fingerprint and ensure_schema_loaded(force=False). Why: detect schema changes and avoid repeated work.
+
+When creating semantic_mapper.py: return top-k matches with scores and canonical ids. Log + emit embedding_match_score. Why: mapping is the single source of truth for term normalization.
+
+When adding cypher_validator.py: enforce allow-list names, ban write keywords and CALL/apoc, detect * or .. patterns and compare to guardrails.max_traversal_depth. Why: prevent destructive or unbounded queries.
+
+When adding query_executor.py: enforce timeouts, add LIMIT if missing (configurable), call only read APIs. Why: protect DB and bound result size.
+
+When refactoring rag.py (LLM flow): use structured LLM schema ({cypher, params}), validate result before executing, and always audit LLM outputs and validation. Why: LLM outputs must be checked before execution.
+
+When adding admin endpoint: protect with ADMIN_REFRESH_TOKEN header; it must call ensure_schema_loaded(force=True) and upsert_schema_embeddings() and log/audit outcome. Why: operators need controlled refresh.
+
+Minimal acceptance checks after each relevant task (smoke tests)
+
+After startup wiring: logs show "Schema ingestion and embeddings upsert complete" (or a graceful error in DEV_MODE). .schema_fingerprint exists.
+
+After write-guard: calling execute_write_query without admin env raises RuntimeError.
+
+After validator changes: a Cypher containing CREATE or CALL apoc is rejected by validate_cypher.
+
+After semantic mapper: map_term("customers") returns list with canonical_id or empty list (no crash).
+
+After rag refactor: rag_chain.invoke("Who founded Acme?") returns JSON with keys cypher, params, rows, snippets, summary, citations (DEV_MODE allowed to mock contents).

@@ -1,0 +1,29 @@
+{"event": "cypher_validation_failed", "reason": "traversal_depth_exceeds_limit", "depth_cap": 3, "requested_depth": "4", "pattern": "[*..4]", "cypher_preview": "MATCH (n)-[*..4]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "traversal_depth_exceeds_limit", "depth_cap": 3, "requested_depth": "5", "pattern": "[*..5]", "cypher_preview": "MATCH (n)-[*..5]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "traversal_depth_exceeds_limit", "depth_cap": 2, "requested_depth": "5", "pattern": "[*..5]", "cypher_preview": "MATCH (n)-[*..5]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "unbounded_traversal_detected", "depth_cap": 2, "patterns": ["[*..]"], "cypher_preview": "MATCH (n)-[*]->(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "unbounded_traversal_detected", "depth_cap": 2, "patterns": ["[*..]"], "cypher_preview": "MATCH (n)-[*..]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "unbounded_traversal_detected", "depth_cap": 2, "pattern": "[*2..]", "cypher_preview": "MATCH (n)-[*2..]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "schema_violation", "cypher_preview": "MATCH (n:Student)-[:INVALID_REL*..5]->(m:InvalidLabel) RETURN n, m", "invalid_labels": ["InvalidLabel"], "invalid_relationships": []}
+{"event": "cypher_validation_failed", "reason": "unbounded_traversal_detected", "depth_cap": 2, "patterns": ["[*..]"], "cypher_preview": "MATCH (n)-[*]->(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "traversal_depth_exceeds_limit", "depth_cap": 3, "requested_depth": "4", "pattern": "[*..4]", "cypher_preview": "MATCH (n)-[*..4]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "traversal_depth_exceeds_limit", "depth_cap": 3, "requested_depth": "5", "pattern": "[*..5]", "cypher_preview": "MATCH (n)-[*..5]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "traversal_depth_exceeds_limit", "depth_cap": 2, "requested_depth": "5", "pattern": "[*..5]", "cypher_preview": "MATCH (n)-[*..5]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "unbounded_traversal_detected", "depth_cap": 2, "patterns": ["[*..]"], "cypher_preview": "MATCH (n)-[*]->(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "unbounded_traversal_detected", "depth_cap": 2, "patterns": ["[*..]"], "cypher_preview": "MATCH (n)-[*..]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "unbounded_traversal_detected", "depth_cap": 2, "pattern": "[*2..]", "cypher_preview": "MATCH (n)-[*2..]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "unbounded_traversal_detected", "depth_cap": 2, "patterns": ["[*..]"], "cypher_preview": "MATCH (n)-[*]->(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "unbounded_traversal_detected", "depth_cap": 2, "patterns": ["[*]"], "cypher_preview": "MATCH (n)-[*]->(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "unbounded_traversal_detected", "depth_cap": 2, "patterns": ["[*..]"], "cypher_preview": "MATCH (n)-[*..]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "unbounded_traversal_detected", "depth_cap": 2, "patterns": ["[:KNOWS*]"], "cypher_preview": "MATCH (n)-[:KNOWS*]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "traversal_depth_exceeds_limit", "depth_cap": 3, "requested_depth": "4", "pattern": "[*..4]", "cypher_preview": "MATCH (n)-[*..4]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "traversal_depth_exceeds_limit", "depth_cap": 3, "requested_depth": "5", "pattern": "[*..5]", "cypher_preview": "MATCH (n)-[*..5]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "traversal_depth_exceeds_limit", "depth_cap": 2, "requested_depth": "5", "pattern": "[*..5]", "cypher_preview": "MATCH (n)-[*..5]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "traversal_depth_exceeds_limit", "depth_cap": 2, "requested_depth": "3", "pattern": "[:KNOWS*1..3]", "cypher_preview": "MATCH (n)-[:KNOWS*1..3]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "traversal_depth_exceeds_limit", "depth_cap": 2, "requested_depth": "10", "pattern": "[*..10]", "cypher_preview": "MATCH (n)-[*..10]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "unbounded_traversal_detected", "depth_cap": 2, "patterns": ["[*]"], "cypher_preview": "MATCH (n)-[*]->(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "unbounded_traversal_detected", "depth_cap": 2, "patterns": ["[*..]"], "cypher_preview": "MATCH (n)-[*..]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "unbounded_traversal_detected", "depth_cap": 2, "patterns": ["[:KNOWS*]"], "cypher_preview": "MATCH (n)-[:KNOWS*]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "unbounded_traversal_detected", "depth_cap": 2, "pattern": "[*2..]", "cypher_preview": "MATCH (n)-[*2..]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "unbounded_traversal_detected", "depth_cap": 2, "pattern": "[:KNOWS*1..]", "cypher_preview": "MATCH (n)-[:KNOWS*1..]-(m) RETURN n, m"}
+{"event": "cypher_validation_failed", "reason": "traversal_depth_exceeds_limit", "depth_cap": 2, "requested_depth": "5", "pattern": "[:ENROLLED_IN*..5]", "cypher_preview": "MATCH (n:Student)-[:ENROLLED_IN*..5]->(c:Course) RETURN n, c"}

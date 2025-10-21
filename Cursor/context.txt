@@ -1,0 +1,95 @@
+# Placeholder for Cursor/context.txt
+Project Context — GraphRAG Secure NL → Cypher Service (Cursor)
+
+Mission (MVP, 1 sentence)
+Build a secure, observable web service that accepts natural-language queries, maps user terms to the actual Neo4j schema extracted at startup, generates a validated parameterized Cypher query restricted to an allow-list, executes read-only with guardrails, augments results with adjacent graph context, and returns structured rows plus an LLM summary and citations.
+
+Core Constraints & Data Boundaries (DOs / DON’Ts)
+- DO treat the live Neo4j schema as the single source of truth. Extract labels, relationship types, and properties on startup → persist allow-list artifact.
+- DO run startup pipeline idempotently (skip work if schema fingerprint/timestamp unchanged). Admin trigger to re-run on schema change.
+- DO return both machine-readable JSON rows and an LLM summary with citation IDs.
+- DO enforce read-only execution, timeouts, traversal depth, max row limits, and LLM rate limiting.
+- DON’T ingest or read any external documents at runtime for MVP semantic mapping; schema-only awareness.
+- DON’T interpolate user text into Cypher; only use validated/back-ticked identifiers and parameters.
+
+Pipelines (what must exist and pass)
+Pipeline 1 — Schema ingestion & embeddings (startup)
+1) Extract schema from Neo4j (labels, rel types, properties + types).
+2) Persist allow-list artifact (file/DB). Use schema as golden source (JSON fallback only if needed).
+3) Load synonyms (optional JSON / admin UI). Create embeddings for canonical terms + synonyms.
+4) Upsert SchemaTerm vector nodes and create/verify vector index.
+5) Idempotency: compare schema fingerprint; skip if unchanged. Provide clear startup logs (success or actionable error).
+AC: allow-list exists; SchemaTerm nodes present with embeddings; vector index queryable; startup log shows success/failure.
+
+Pipeline 2 — NL → Validated Cypher → Exec + Augment → LLM
+1) Ingest & sanitize user text; heuristic block for injections.
+2) Intent + entity detection; map user terms → canonical schema via (a) embedding similarity over schema terms, (b) heuristic exact/plural/fuzzy as fallback.
+3) Generate parameterized Cypher; validate every label/rel/property against allow-list before execution.
+4) Guardrails: read-only mode, timeout, max traversal depth, max rows; rate-limit LLM (Redis).
+5) Execute validated query; return structured results.
+6) GraphRAG augmentation: limited neighbor/adjacent context (respect limits).
+7) LLM summary with citations to node/chunk IDs; return JSON + text summary.
+AC: a sample NL query yields a parameterized, allow-listed Cypher that executes read-only within limits; response includes rows + context + summary + citations; audit/metrics/traces recorded.
+
+Security, Observability, Audit (non-functional MVP must-haves)
+- Security: read-only Neo4j credentials; strict input sanitization; allow-list enforcement; reject/audit malicious input.
+- Observability: Prometheus metrics (query latency, LLM calls, embedding match scores, error rates), structured logs, OpenTelemetry traces for the full request path.
+- Audit: append-only log of each query including mapping scores, generated Cypher, guardrail decisions, and citation verification outcomes.
+- Performance: LLM token/request rate limits; cap vector search top-K and expansion breadth.
+- Reliability: DEV_MODE mocks are OK for local tests; production requires real Neo4j/LLM.
+
+What files Cursor should focus on (primary edit targets)
+- Startup schema + embeddings: graph_rag/schema_manager.py, graph_rag/schema_catalog.py, graph_rag/schema_embeddings.py
+- NL → plan → mapping: graph_rag/planner.py, graph_rag/semantic_mapper.py
+- Cypher generation + validation: graph_rag/cypher_generator.py, graph_rag/cypher_validator.py
+- Query execution + guardrails: graph_rag/query_executor.py, graph_rag/neo4j_client.py, graph_rag/guardrail.py
+- Retrieval & augmentation: graph_rag/retriever.py, graph_rag/rag_augmentor.py
+- Orchestration & summary: graph_rag/rag.py, graph_rag/llm_client.py
+- API & persistence: main.py, graph_rag/response_formatter.py, graph_rag/conversation_store.py, graph_rag/audit_store.py
+- Config & ops: graph_rag/config_manager.py, graph_rag/observability.py, config.yaml, docker-compose.yml
+
+Implementation rules Cursor must enforce
+- Label/Rel/Property Safety: validate all identifiers against allow-list before building queries. Fallback to safe generic label only with explicit warning (and still back-tick).
+- Parameters Only: every value is a Cypher parameter; no string concatenation of values into query text.
+- Read-only: set read mode in Neo4j client; block writes outside admin ingest paths.
+- Timeouts/Depth/Rows: enforce values from config.yaml (e.g., timeout=10s, depth ≤2, rows ≤25 by default).
+- LLM Calls: structured outputs only (Pydantic schema); apply Redis token bucket; avoid raw free-form generations in critical paths.
+- Tracing & Metrics: start a root span per request; annotate stages (plan, validate, execute, augment, summarize); expose Prometheus counters/histograms.
+- Idempotent Startup: startup sequence must detect existing embeddings/index and skip rework; expose clear logs.
+- DEV vs PROD: DEV_MODE uses mocks; PROD requires real services.
+
+Response contract (what the API returns)
+- JSON: { trace_id, plan { intent, mapped_terms, anchor }, cypher { text, params, validated:true }, rows:[…], context:[…], citations:[…], summary:text }
+- Plain-text: concise LLM summary with bracketed citation ids.
+- (UI note) Also return graph/table-ready data structures for a future frontend.
+
+Testing expectations (what to keep green / add)
+- Security: injection prevention, label/rel/property validation, read-only enforcement.
+- Planner/Mapping: entity extraction + top-K schema term mapping via embeddings; thresholds and fallbacks covered.
+- Validator: rejects any identifier not in allow-list; verifies traversal and result-limit guards.
+- Execution: timeout honored; large result truncation; errors surfaced with safe messages.
+- RAG: augmentation bounded by limits; citations verified; audit records written.
+- Observability: metrics exported; traces emitted; logs structured.
+- Startup: schema extraction + embeddings idempotency; index creation/verification.
+- Rate limiting: per-minute LLM limits with Redis mocks for tests.
+
+Configuration defaults (reference)
+- guardrails.neo4j_timeout=10, max_cypher_results=25, max_traversal_depth=2
+- retriever.max_chunks=5
+- observability.metrics_enabled=true, metrics_port=8001
+- llm: provider, model, embedding_model, rate_limit_per_minute=60, redis_url
+(Use config_manager for lazy, thread-safe access. Don’t read config at import time.)
+
+Operational notes (for local/dev vs prod)
+- Local DEV: DEV_MODE=true for mocks; generate allow-list from live Neo4j before first run; optional admin endpoint to force refresh.
+- Production: real Neo4j (read-only), Redis for rate limiting, vector index present; secrets via environment; audit log retained.
+
+Acceptance Criteria (sign-off gate)
+- First boot: allow-list written from live schema; SchemaTerm nodes embedded; vector index queryable; logs show success.
+- Example NL query: produces validated parameterized Cypher that executes read-only within time/limit/depth; response returns rows+context+summary+citations; audit + metrics + trace exist for the request.
+
+Anchors to repository structure (for Cursor navigation)
+- See CODE_DUMP_2025-10-19… for the authoritative file list and current module layout, including tests and ops docs. (Keep changes consistent with those paths.) :contentReference[oaicite:0]{index=0}
+
+Appendix — Data extracts provided
+- node-export.csv, relationship-export.csv, graph-export.csv are sample graph snapshots for dev/testing only. Do NOT infer schema from them in production; always extract the schema from the live Neo4j on startup (Pipeline 1).

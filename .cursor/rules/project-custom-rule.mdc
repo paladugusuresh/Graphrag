@@ -1,0 +1,16 @@
+---
+alwaysApply: true
+---
+Read-only by default: Disallow any Neo4j writes unless APP_MODE=admin or ALLOW_WRITES=true. Add write-guard early.
+
+Fail-closed on safety: If Cypher is ambiguous or uses write/procedure/unbounded traversal, reject it. Prefer rejecting over risky acceptance.
+
+Idempotent startup: Schema ingestion/upsert must use fingerprint and not repeat work unnecessarily.
+
+Sanitize & audit: Sanitize inputs, run heuristics, and record all important events to audit_store.record() (mapping decisions, validation failures, guardrail blocks, LLM parse errors).
+
+Prometheus & tracing: Emit embedding match scores and cypher validation failures; keep spans for major steps.
+
+DEV_MODE safe: If DEV_MODE=true, use mocks and never crash server—log and continue degraded.
+
+One atomic commit per task: Small, revertible commits with clear message.

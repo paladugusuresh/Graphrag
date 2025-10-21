@@ -1,0 +1,33 @@
+name: Python CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run unit tests
+        run: |
+          python -m pytest -q -m "not needs_neo4j and not integration"
+      - name: Run integration tests (Neo4j not available)
+        run: |
+          # Skip integration tests in CI since Neo4j is not available
+          # These tests require a running Neo4j instance and are marked with @pytest.mark.needs_neo4j
+          echo "Skipping integration tests - Neo4j service not available in CI"
+          python -m pytest -m "needs_neo4j" --collect-only
+          # Optional: Run flake8 if available
+          # pip install flake8
+          # flake8 .
