@@ -119,6 +119,17 @@ def RETRIEVAL_CHUNK_EMBEDDINGS_ENABLED() -> bool:
     return _get_bool_flag("RETRIEVAL_CHUNK_EMBEDDINGS_ENABLED", "flags.retrieval_chunk_embeddings_enabled", False)
 
 
+def MAPPER_ENABLED() -> bool:
+    """
+    Whether to enable SynonymMapper for semantic term mapping.
+    
+    Default: True (current behavior - mapper enabled)
+    Environment: MAPPER_ENABLED
+    Config: flags.mapper_enabled
+    """
+    return _get_bool_flag("MAPPER_ENABLED", "flags.mapper_enabled", True)
+
+
 def get_all_flags() -> dict[str, Union[bool, int]]:
     """
     Get all feature flags as a dictionary for logging/debugging.
@@ -133,4 +144,5 @@ def get_all_flags() -> dict[str, Union[bool, int]]:
         "GUARDRAILS_MAX_HOPS": GUARDRAILS_MAX_HOPS(),
         "SCHEMA_BOOTSTRAP_ENABLED": SCHEMA_BOOTSTRAP_ENABLED(),
         "RETRIEVAL_CHUNK_EMBEDDINGS_ENABLED": RETRIEVAL_CHUNK_EMBEDDINGS_ENABLED(),
+        "MAPPER_ENABLED": MAPPER_ENABLED(),
     }
