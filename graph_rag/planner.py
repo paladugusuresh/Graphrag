@@ -154,7 +154,7 @@ def generate_plan(question: str) -> QueryPlan:
     with create_pipeline_span("planner.generate_plan", question=question[:100]) as span:
         with planner_latency_seconds.time():
             # Create prompt for LLM-driven intent classification (Student Support domain)
-    prompt = f"""You are a query planner for a Student Support graph database system. Your task is to analyze the user question and identify the query intent with appropriate parameters.
+            prompt = f"""You are a query planner for a Student Support graph database system. Your task is to analyze the user question and identify the query intent with appropriate parameters.
 
 User Question: "{question}"
 

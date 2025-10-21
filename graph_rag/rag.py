@@ -100,6 +100,55 @@ Generate the Cypher query now:"""
         
         return prompt
 
+    def _build_template_params(self, plan, template_cypher: str) -> Dict[str, Any]:
+        """
+        Build parameters for Cypher template based on plan and template content.
+        
+        Args:
+            plan: Query plan with intent and parameters
+            template_cypher: The template Cypher query
+            
+        Returns:
+            Dictionary of parameters for the template
+        """
+        params = {}
+        
+        # Extract student name from plan parameters or anchor entity
+        student_name = None
+        if plan.params and 'student_name' in plan.params:
+            student_name = plan.params['student_name']
+        elif plan.params and 'student' in plan.params:
+            student_name = plan.params['student']
+        elif plan.anchor_entity:
+            student_name = plan.anchor_entity
+        
+        if student_name:
+            params['student'] = student_name
+        
+        # Add default limit if not specified
+        if '$limit' in template_cypher and 'limit' not in params:
+            params['limit'] = 20
+        
+        # Add date range parameters for eval_reports_for_student_in_range
+        if plan.intent == "eval_reports_for_student_in_range":
+            if plan.params and 'from' in plan.params:
+                params['from'] = plan.params['from']
+            else:
+                # Default to last 6 months if not specified
+                from datetime import datetime, timedelta
+                six_months_ago = datetime.now() - timedelta(days=180)
+                params['from'] = six_months_ago.strftime('%Y-%m-%d')
+            
+            if plan.params and 'to' in plan.params:
+                params['to'] = plan.params['to']
+            else:
+                # Default to today
+                from datetime import datetime
+                params['to'] = datetime.now().strftime('%Y-%m-%d')
+        
+        logger.debug(f"Built template parameters for intent '{plan.intent}': {params}")
+        return params
+
     def _extract_primary_ids(self, rows: List[Dict[str, Any]]) -> List[str]:
         """
         Extract primary IDs from query result rows.
@@ -161,23 +210,62 @@ Generate the Cypher query now:"""
                     span.set_attribute("plan.anchor_entity", plan.anchor_entity or "none")
                     logger.info(f"Plan generated: intent={plan.intent}, anchor={plan.anchor_entity}")
                 
-                # Step 2: Generate Cypher via LLM
+                # Step 2: Generate Cypher via Template or LLM
                 with create_pipeline_span("rag.generate_cypher") as cypher_span:
                     try:
                         allow_list = get_allow_list()
-                        cypher_prompt = self._build_cypher_generation_prompt(plan, allow_list)
                         
-                        cypher_output = call_llm_structured(
-                            prompt=cypher_prompt,
-                            schema_model=CypherGenerationOutput
-                        )
+                        # Try to load template first for known intents
+                        template_cypher = None
+                        template_params = {}
+                        
+                        if plan.intent in ["goals_for_student", "accommodations_for_student", "case_manager_for_student", 
+                                         "eval_reports_for_student_in_range", "concern_areas_for_student"]:
+                            from graph_rag.cypher_generator import try_load_template
+                            template_cypher = try_load_template(plan.intent)
+                            
+                            if template_cypher:
+                                # Build parameters for template
+                                template_params = self._build_template_params(plan, template_cypher)
+                                logger.info(f"Using template for intent '{plan.intent}'")
+                                add_span_attributes(cypher_span,
+                                    template_used=True,
+                                    intent=plan.intent,
+                                    params_count=len(template_params)
+                                )
+                                cypher_span.set_attribute("template_used", True)
+                                cypher_span.set_attribute("intent", plan.intent)
+                        
+                        if template_cypher:
+                            # Use template
+                            cypher_output = CypherGenerationOutput(
+                                cypher=template_cypher,
+                                params=template_params
+                            )
+                            logger.info(f"Template Cypher used: {template_cypher[:100]}...")
+                        else:
+                            # Fall back to LLM generation
+                            cypher_prompt = self._build_cypher_generation_prompt(plan, allow_list)
+                            
+                            cypher_output = call_llm_structured(
+                                prompt=cypher_prompt,
+                                schema_model=CypherGenerationOutput
+                            )
+                            
+                            logger.info(f"LLM Cypher generated: {cypher_output.cypher[:100]}...")
+                            add_span_attributes(cypher_span,
+                                template_used=False,
+                                cypher_generated=cypher_output.cypher[:100],
+                                params_count=len(cypher_output.params)
+                            )
+                            cypher_span.set_attribute("template_used", False)
+                            cypher_span.set_attribute("cypher_generated", cypher_output.cypher[:100])
                         
                         add_span_attributes(cypher_span,
                             cypher_generated=cypher_output.cypher[:100],
                             params_count=len(cypher_output.params)
                         )
                         cypher_span.set_attribute("cypher_generated", cypher_output.cypher[:100])
-                        logger.info(f"Cypher generated: {cypher_output.cypher[:100]}...")
                         
                     except LLMStructuredError as e:
                         logger.error(f"Cypher generation failed: {e}")
