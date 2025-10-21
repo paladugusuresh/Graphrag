@@ -21,15 +21,25 @@ logger = get_logger(__name__)
 LABEL_PATTERN = re.compile(r'\(\s*[a-zA-Z_][a-zA-Z0-9_]*\s*:\s*([A-Za-z_][A-Za-z0-9_]*)')
 RELATIONSHIP_PATTERN = re.compile(r'\[:\s*([A-Z_][A-Z0-9_]*)\s*\]')
 
+# Property extraction patterns for validation
+PROPERTY_PATTERN = re.compile(r'(\w+)\.(\w+)')
+RETURN_PROPERTY_PATTERN = re.compile(r'RETURN\s+.*?(\w+)\.(\w+)', re.IGNORECASE)
+WHERE_PROPERTY_PATTERN = re.compile(r'WHERE\s+.*?(\w+)\.(\w+)', re.IGNORECASE)
+ORDER_BY_PROPERTY_PATTERN = re.compile(r'ORDER\s+BY\s+.*?(\w+)\.(\w+)', re.IGNORECASE)
+
+# LIMIT clause patterns
+LIMIT_PATTERN = re.compile(r'LIMIT\s+(\d+|\$\w+)', re.IGNORECASE)
+LIMIT_CLAUSE_PATTERN = re.compile(r'LIMIT\s+', re.IGNORECASE)
+
 # Regex to find dangerous keywords that are not inside quotes
 WRITE_PROC_RE = re.compile(
     r"\b(CREATE|MERGE|DELETE|SET|REMOVE|DROP|LOAD\s+CSV|CALL|UNWIND|FOREACH|DETACH\s+DELETE|apoc\.|db\.)\b",
     re.IGNORECASE
 )
 
-# Regex for unbounded traversals: [*], [*..], [..], [:TYPE*], [:TYPE*..], etc.
-# This matches patterns with or without relationship types
-UNBOUNDED_TRAVERSAL_RE = re.compile(r"\[(?::[A-Z_][A-Z0-9_]*)?\s*\*(?!\d+)(?:\s*\.\.)?\s*\]") 
+# Regex for unbounded traversals: [*], [*..], [..], [:TYPE*], [:TYPE*..], [alias:TYPE*], etc.
+# This matches patterns with or without relationship types and aliases
+UNBOUNDED_TRAVERSAL_RE = re.compile(r"\[(?:\w+\s*:\s*)?[A-Z_][A-Z0-9_]*\s*\*(?!\d+)(?:\s*\.\.)?\s*\]|\[\s*:\s*[A-Z_][A-Z0-9_]*\s*\*(?!\d+)(?:\s*\.\.)?\s*\]|\[\s*\*(?!\d+)(?:\s*\.\.)?\s*\]") 
 
 # Regex for bounded traversals: [*N..M], [*..M], [*N..], [:TYPE*N..M], etc.
 BOUNDED_TRAVERSAL_RE = re.compile(r"\[(?::[A-Z_][A-Z0-9_]*)?\s*\*(\d*)\s*(\.\.)?\s*(\d*)\s*\]")
@@ -82,6 +92,251 @@ def _validate_parameterization(cypher: str) -> bool:
         return False
     
     return True
+
+def extract_properties(cypher: str) -> List[Tuple[str, str]]:
+    """
+    Extract property references (node.property) from Cypher query.
+    
+    Args:
+        cypher: The Cypher query string
+        
+    Returns:
+        List of tuples (node_alias, property_name) found in the query
+    """
+    if not cypher:
+        return []
+    
+    properties = []
+    
+    # Extract from RETURN clauses
+    return_matches = RETURN_PROPERTY_PATTERN.findall(cypher)
+    for node_alias, prop_name in return_matches:
+        properties.append((node_alias, prop_name))
+    
+    # Extract from WHERE clauses
+    where_matches = WHERE_PROPERTY_PATTERN.findall(cypher)
+    for node_alias, prop_name in where_matches:
+        properties.append((node_alias, prop_name))
+    
+    # Extract from ORDER BY clauses
+    order_matches = ORDER_BY_PROPERTY_PATTERN.findall(cypher)
+    for node_alias, prop_name in order_matches:
+        properties.append((node_alias, prop_name))
+    
+    # Extract general property patterns
+    general_matches = PROPERTY_PATTERN.findall(cypher)
+    for node_alias, prop_name in general_matches:
+        properties.append((node_alias, prop_name))
+    
+    # Remove duplicates
+    unique_properties = list(set(properties))
+    logger.debug(f"Extracted properties from Cypher: {unique_properties}")
+    
+    return unique_properties
+
+
+def _validate_properties(cypher: str, allow_list: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+    """
+    Validate that all property references in the query are in the allow-list.
+    
+    Args:
+        cypher: The Cypher query string
+        allow_list: The schema allow-list containing properties
+        
+    Returns:
+        Tuple of (is_valid, details_dict)
+    """
+    if not cypher:
+        return True, {}
+    
+    details = {
+        "found_properties": [],
+        "invalid_properties": [],
+        "blocked_reason": None
+    }
+    
+    # Extract all property references
+    properties = extract_properties(cypher)
+    details["found_properties"] = properties
+    
+    # Get allowed properties from allow-list
+    allowed_properties = allow_list.get("properties", {})
+    
+    # Special handling for Goal entity - ensure goalType and id are allowed
+    if "Goal" in allowed_properties:
+        goal_props = set(allowed_properties["Goal"])
+        # Add goalType and id if not already present
+        if "goalType" not in goal_props:
+            goal_props.add("goalType")
+        if "id" not in goal_props:
+            goal_props.add("id")
+        allowed_properties["Goal"] = list(goal_props)
+    
+    # Check each property reference
+    invalid_properties = []
+    for node_alias, prop_name in properties:
+        # Find the label for this node alias by looking at the query
+        # This is a simplified approach - in practice, you might need more sophisticated parsing
+        node_label = None
+        
+        # Try to find the label by looking for patterns like (alias:Label)
+        label_match = re.search(rf'\(\s*{re.escape(node_alias)}\s*:\s*([A-Za-z_][A-Za-z0-9_]*)', cypher)
+        if label_match:
+            node_label = label_match.group(1)
+        
+        # If we found a label, check if the property is allowed
+        if node_label and node_label in allowed_properties:
+            allowed_props = set(allowed_properties[node_label])
+            if prop_name not in allowed_props:
+                invalid_properties.append(f"{node_label}.{prop_name}")
+        elif node_label:
+            # Label exists but no properties defined - this might be an issue
+            logger.warning(f"Node label '{node_label}' found but no properties defined in allow-list")
+            invalid_properties.append(f"{node_label}.{prop_name}")
+        else:
+            # Couldn't determine the label - be conservative and reject
+            logger.warning(f"Could not determine label for node alias '{node_alias}'")
+            invalid_properties.append(f"{node_alias}.{prop_name}")
+    
+    details["invalid_properties"] = invalid_properties
+    
+    if invalid_properties:
+        reason = "unknown_property"
+        logger.warning(f"Property validation failed. Invalid properties: {invalid_properties}")
+        cypher_validation_failures.inc()
+        
+        details["blocked_reason"] = f"Query references unknown properties: {', '.join(invalid_properties)}"
+        
+        # Audit log
+        audit_store.record({
+            "event": "cypher_validation_failed",
+            "reason": reason,
+            "invalid_properties": invalid_properties,
+            "cypher_preview": cypher[:200]
+        })
+        
+        return False, details
+    
+    logger.debug("Property validation passed")
+    return True, details
+
+
+def _validate_limit_clause(cypher: str, params: Dict[str, Any] = None) -> Tuple[bool, Dict[str, Any]]:
+    """
+    Validate and enforce LIMIT clause in Cypher query.
+    
+    Args:
+        cypher: The Cypher query string
+        params: Query parameters (may be modified to add limit)
+        
+    Returns:
+        Tuple of (is_valid, modified_cypher, details_dict)
+    """
+    if not cypher:
+        return True, cypher, {}
+    
+    details = {
+        "has_limit": False,
+        "limit_value": None,
+        "limit_exceeded": False,
+        "blocked_reason": None
+    }
+    
+    # Get configuration values
+    max_limit = get_config_value("validator.max_limit", 100)
+    default_limit = get_config_value("validator.default_limit", 20)
+    
+    # Check if LIMIT clause exists
+    limit_match = LIMIT_PATTERN.search(cypher)
+    if limit_match:
+        details["has_limit"] = True
+        limit_value = limit_match.group(1)
+        details["limit_value"] = limit_value
+        
+        # Check if it's a parameter ($limit) or a literal number
+        if limit_value.startswith('$'):
+            # It's a parameter - check if it exceeds max_limit
+            if params and limit_value[1:] in params:
+                param_value = params[limit_value[1:]]
+                if isinstance(param_value, int) and param_value > max_limit:
+                    details["limit_exceeded"] = True
+                    reason = "limit_exceeded"
+                    logger.warning(f"LIMIT clause exceeds maximum allowed limit: {param_value} > {max_limit}")
+                    cypher_validation_failures.inc()
+                    
+                    details["blocked_reason"] = f"LIMIT value ({param_value}) exceeds maximum allowed limit ({max_limit})"
+                    
+                    # Audit log
+                    audit_store.record({
+                        "event": "cypher_validation_failed",
+                        "reason": reason,
+                        "limit_value": param_value,
+                        "max_limit": max_limit,
+                        "cypher_preview": cypher[:200]
+                    })
+                    
+                    return False, cypher, details
+        else:
+            # It's a literal number
+            try:
+                literal_limit = int(limit_value)
+                if literal_limit > max_limit:
+                    details["limit_exceeded"] = True
+                    reason = "limit_exceeded"
+                    logger.warning(f"LIMIT clause exceeds maximum allowed limit: {literal_limit} > {max_limit}")
+                    cypher_validation_failures.inc()
+                    
+                    details["blocked_reason"] = f"LIMIT value ({literal_limit}) exceeds maximum allowed limit ({max_limit})"
+                    
+                    # Audit log
+                    audit_store.record({
+                        "event": "cypher_validation_failed",
+                        "reason": reason,
+                        "limit_value": literal_limit,
+                        "max_limit": max_limit,
+                        "cypher_preview": cypher[:200]
+                    })
+                    
+                    return False, cypher, details
+            except ValueError:
+                # Invalid limit value
+                reason = "invalid_limit_value"
+                logger.warning(f"Invalid LIMIT value: {limit_value}")
+                cypher_validation_failures.inc()
+                
+                details["blocked_reason"] = f"Invalid LIMIT value: {limit_value}"
+                
+                # Audit log
+                audit_store.record({
+                    "event": "cypher_validation_failed",
+                    "reason": reason,
+                    "limit_value": limit_value,
+                    "cypher_preview": cypher[:200]
+                })
+                
+                return False, cypher, details
+    else:
+        # No LIMIT clause found - add one
+        logger.debug("No LIMIT clause found, adding default LIMIT")
+        
+        # Add LIMIT clause at the end
+        modified_cypher = cypher.rstrip().rstrip(';')
+        if not modified_cypher.upper().endswith('LIMIT'):
+            modified_cypher += f" LIMIT $limit"
+        
+        # Add default limit to parameters if provided
+        if params is not None:
+            params["limit"] = default_limit
+        
+        details["limit_added"] = True
+        details["default_limit"] = default_limit
+        
+        logger.debug(f"Added LIMIT $limit with default value {default_limit}")
+        return True, modified_cypher, details
+    
+    logger.debug("LIMIT clause validation passed")
+    return True, cypher, details
+
 
 def extract_labels(cypher: str) -> List[str]:
     """
@@ -247,10 +502,17 @@ def _enforce_depth_caps(cypher: str, max_hops: int = None) -> Tuple[bool, Dict[s
     logger.debug(f"Depth cap check passed. Patterns found: {details['variable_length_patterns']}")
     return True, details
 
-def validate_cypher(cypher: str) -> Tuple[bool, Dict[str, Any]]:
+def validate_cypher(cypher: str, params: Dict[str, Any] = None) -> Tuple[bool, Dict[str, Any]]:
     """
     Validate Cypher query against allow-list and security rules.
-    This is the core security firewall.
+    This is the core security firewall with enhanced validation.
+    
+    Args:
+        cypher: The Cypher query string to validate
+        params: Query parameters (may be modified to add limit)
+        
+    Returns:
+        Tuple of (is_valid, details_dict)
     """
     if not cypher or not cypher.strip():
         logger.warning("Empty Cypher query provided for validation")
@@ -259,11 +521,14 @@ def validate_cypher(cypher: str) -> Tuple[bool, Dict[str, Any]]:
     details = {
         "found_labels": [],
         "found_relationships": [],
+        "found_properties": [],
         "invalid_labels": [],
         "invalid_relationships": [],
+        "invalid_properties": [],
         "invalid_clauses": [],
         "invalid_procedures": [],
         "variable_length_patterns": [],
+        "limit_details": {},
         "blocked_reason": None,
     }
     
@@ -329,8 +594,7 @@ def validate_cypher(cypher: str) -> Tuple[bool, Dict[str, Any]]:
         allow_list_labels = set(allow_list.get("node_labels", []))
         allow_list_rels = set(allow_list.get("relationship_types", []))
 
-        # 5. Extract and Validate Labels/Relationships
-        # Run extraction on the *original* cypher (regexes should be safe, but masked is safer if issues arise)
+        # 6. Extract and Validate Labels/Relationships
         found_labels = extract_labels(cypher)
         found_relationships = extract_rels(cypher)
         
@@ -357,6 +621,33 @@ def validate_cypher(cypher: str) -> Tuple[bool, Dict[str, Any]]:
             details["blocked_reason"] = "Query uses schema terms not in the allow-list."
             return False, details
 
+        # 7. NEW: Validate Properties
+        prop_valid, prop_details = _validate_properties(cypher, allow_list)
+        if not prop_valid:
+            # Merge property validation details
+            details["found_properties"] = prop_details.get("found_properties", [])
+            details["invalid_properties"] = prop_details.get("invalid_properties", [])
+            details["blocked_reason"] = prop_details.get("blocked_reason")
+            return False, details
+        
+        # Merge property details
+        details["found_properties"] = prop_details.get("found_properties", [])
+
+        # 8. NEW: Validate and Enforce LIMIT clause
+        limit_valid, modified_cypher, limit_details = _validate_limit_clause(cypher, params)
+        if not limit_valid:
+            details["limit_details"] = limit_details
+            details["blocked_reason"] = limit_details.get("blocked_reason")
+            return False, details
+        
+        # Merge limit details
+        details["limit_details"] = limit_details
+        
+        # If LIMIT was added, update the cypher
+        if limit_details.get("limit_added", False):
+            details["modified_cypher"] = modified_cypher
+            logger.info(f"Added LIMIT clause to query: {modified_cypher[:100]}...")
+
         logger.info(f"Cypher validation passed for query: {cypher[:100]}...")
         return True, details
 
@@ -374,15 +665,16 @@ def validate_cypher(cypher: str) -> Tuple[bool, Dict[str, Any]]:
         details["blocked_reason"] = f"An internal error occurred during validation: {e}"
         return False, details
 
-def validate_cypher_safe(cypher: str) -> bool:
+def validate_cypher_safe(cypher: str, params: Dict[str, Any] = None) -> bool:
     """
     Simple boolean validation wrapper for cases where only pass/fail is needed.
     
     Args:
         cypher: The Cypher query string to validate
+        params: Query parameters (may be modified to add limit)
         
     Returns:
         True if query is valid, False otherwise
     """
-    is_valid, _ = validate_cypher(cypher)
+    is_valid, _ = validate_cypher(cypher, params)
     return is_valid
