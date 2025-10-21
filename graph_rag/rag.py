@@ -10,7 +10,7 @@ import uuid
 from typing import Optional, List, Dict, Any
 from graph_rag.planner import generate_plan
 from graph_rag.retriever import Retriever
-from graph_rag.observability import get_logger, tracer, create_pipeline_span, add_span_attributes
+from graph_rag.observability import get_logger, tracer, create_pipeline_span, add_span_attributes, set_span_attr
 from opentelemetry.trace import get_current_span
 from graph_rag.audit_store import audit_store
 from graph_rag.llm_client import call_llm_structured, LLMStructuredError
@@ -212,8 +212,8 @@ Generate the Cypher query now:"""
                         intent=plan.intent,
                         anchor_entity=plan.anchor_entity or "none"
                     )
-                    span.set_attribute("plan.intent", plan.intent)
-                    span.set_attribute("plan.anchor_entity", plan.anchor_entity or "none")
+                    set_span_attr(span, "plan.intent", plan.intent)
+                    set_span_attr(span, "plan.anchor_entity", plan.anchor_entity or "none")
                     logger.info(f"Plan generated: intent={plan.intent}, anchor={plan.anchor_entity}")
                 
                 # Step 2: Generate Cypher via Template or LLM
@@ -238,8 +238,8 @@ Generate the Cypher query now:"""
                                 intent=plan.intent,
                                 params_count=len(plan.params)
                             )
-                            cypher_span.set_attribute("template_used", True)
-                            cypher_span.set_attribute("intent", plan.intent)
+                            set_span_attr(cypher_span, "template_used", True)
+                            set_span_attr(cypher_span, "intent", plan.intent)
                         else:
                             # Fall back to LLM generation with strict parameterization
                             try:
@@ -254,8 +254,8 @@ Generate the Cypher query now:"""
                                     cypher_generated=llm_cypher[:100],
                                     params_count=len(plan.params)
                                 )
-                                cypher_span.set_attribute("template_used", False)
-                                cypher_span.set_attribute("cypher_generated", llm_cypher[:100])
+                                set_span_attr(cypher_span, "template_used", False)
+                                set_span_attr(cypher_span, "cypher_generated", llm_cypher[:100])
                             except RuntimeError as e:
                                 logger.error(f"LLM Cypher generation failed: {e}")
                                 raise LLMStructuredError(f"LLM Cypher generation failed: {e}") from e
@@ -264,7 +264,7 @@ Generate the Cypher query now:"""
                             cypher_generated=cypher_output.cypher[:100],
                             params_count=len(cypher_output.params)
                         )
-                        cypher_span.set_attribute("cypher_generated", cypher_output.cypher[:100])
+                        set_span_attr(cypher_span, "cypher_generated", cypher_output.cypher[:100])
                         
                     except LLMStructuredError as e:
                         logger.error(f"Cypher generation failed: {e}")
@@ -319,7 +319,7 @@ Generate the Cypher query now:"""
                             rows_returned=len(primary_rows),
                             result_count=len(primary_rows)
                         )
-                        exec_span.set_attribute("rows_returned", len(primary_rows))
+                        set_span_attr(exec_span, "rows_returned", len(primary_rows))
                         logger.info(f"Query executed successfully: {len(primary_rows)} rows returned")
                         
                     except Exception as e:
@@ -343,13 +343,13 @@ Generate the Cypher query now:"""
                 # Step 5: Augment with graph context
                 with create_pipeline_span("rag.augment_results") as aug_span:
                     primary_ids = self._extract_primary_ids(primary_rows)
-                    aug_span.set_attribute("primary_ids_count", len(primary_ids))
+                    set_span_attr(aug_span, "primary_ids_count", len(primary_ids))
                     
                     if primary_ids:
                         try:
                             augmented = augment_results(primary_ids)
                             snippets = augmented.get('neighbors', [])
-                            aug_span.set_attribute("snippets_count", len(snippets))
+                            set_span_attr(aug_span, "snippets_count", len(snippets))
                             logger.info(f"Results augmented: {len(snippets)} snippets")
                         except Exception as e:
                             logger.warning(f"Augmentation failed: {e}")

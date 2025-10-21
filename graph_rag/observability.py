@@ -127,7 +127,40 @@ def add_span_attributes(span, **attributes):
         **attributes: Attributes to add
     """
     for key, value in attributes.items():
+        set_span_attr(span, key, value)
+
+def set_span_attr(span, key: str, value):
+    """
+    Safely set a span attribute with type conversion for OpenTelemetry.
+    
+    Handles None values and complex types (dict, list) by converting to JSON.
+    Prevents "Invalid type" warnings from OpenTelemetry.
+    
+    Args:
+        span: OpenTelemetry span
+        key: Attribute key
+        value: Attribute value (any type)
+    """
+    import json
+    
+    # Skip None values
+    if value is None:
+        return
+    
+    # Check if span is still recording
+    if not span.is_recording():
+        return
+    
+    # Handle primitive types (OpenTelemetry accepts these directly)
+    if isinstance(value, (str, int, float, bool, bytes)):
         span.set_attribute(key, value)
+    else:
+        # Convert complex types (dict, list, etc.) to JSON string
+        try:
+            span.set_attribute(key, json.dumps(value))
+        except (TypeError, ValueError):
+            # If JSON serialization fails, use string representation
+            span.set_attribute(key, str(value))
 
 # Structured Logger
 

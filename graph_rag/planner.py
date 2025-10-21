@@ -6,7 +6,7 @@ Aligned with Student, Goal, InterventionPlan, Referral, and CaseWorker entities.
 """
 import re
 from pydantic import BaseModel, Field
-from graph_rag.observability import get_logger, tracer, planner_latency_seconds, mapping_similarity, create_pipeline_span, add_span_attributes
+from graph_rag.observability import get_logger, tracer, planner_latency_seconds, mapping_similarity, create_pipeline_span, add_span_attributes, set_span_attr
 from graph_rag.llm_client import call_llm_structured, LLMStructuredError
 from graph_rag.cypher_generator import validate_label, load_allow_list
 from graph_rag.semantic_mapper import map_term, get_best_match, SynonymMapper
@@ -172,8 +172,8 @@ def _find_best_anchor_entity_semantic(candidate: str) -> str | None:
     
     try:
         with tracer.start_as_current_span("planner.semantic_mapping") as span:
-            span.set_attribute("candidate_entity", candidate)
-            span.set_attribute("mapper_enabled", True)
+            set_span_attr(span, "candidate_entity", candidate)
+            set_span_attr(span, "mapper_enabled", True)
             
             # Use SynonymMapper for label mapping
             mapper = _get_synonym_mapper()
@@ -199,9 +199,9 @@ def _find_best_anchor_entity_semantic(candidate: str) -> str | None:
                 allow_list = load_allow_list()
                 if validate_label(canonical_id, allow_list) != "`Entity`":  # Check if it's not the fallback
                     logger.info(f"Synonym mapping: '{candidate}' -> '{canonical_id}' (score: {score:.3f}, method: {method})")
-                    span.set_attribute("mapped_entity", canonical_id)
-                    span.set_attribute("similarity_score", score)
-                    span.set_attribute("mapping_method", method)
+                    set_span_attr(span, "mapped_entity", canonical_id)
+                    set_span_attr(span, "similarity_score", score)
+                    set_span_attr(span, "mapping_method", method)
                     return canonical_id
                 else:
                     logger.debug(f"Schema term '{canonical_id}' not in allow_list, skipping")
