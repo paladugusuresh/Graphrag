@@ -13,6 +13,7 @@ from graph_rag.config_manager import get_config_value
 from pydantic import BaseModel
 from graph_rag.cypher_generator import validate_label, validate_relationship_type, load_allow_list
 from graph_rag.audit_store import audit_store
+from graph_rag.flags import RETRIEVAL_CHUNK_EMBEDDINGS_ENABLED
 
 logger = get_logger(__name__)
 
@@ -74,11 +75,47 @@ def process_and_ingest_files():
         for i, chunk in enumerate(chunks):
             chunk_id = f"{doc_id}-chunk-{i}"
             try:
+                # Create the chunk first
                 client.execute_write_query(
                     "MATCH (d:Document {id: $id}) MERGE (c:Chunk {id: $chunk_id}) SET c.text = $text MERGE (d)-[:HAS_CHUNK]->(c)",
                     {"id": doc_id, "chunk_id": chunk_id, "text": chunk.page_content},
                     timeout=get_config_value('guardrails.neo4j_timeout', 10)
                 )
+                
+                # Generate and persist chunk embedding if enabled
+                if RETRIEVAL_CHUNK_EMBEDDINGS_ENABLED():
+                    try:
+                        # Get embedding for the chunk content
+                        embedding_provider = get_embedding_provider()
+                        embeddings = embedding_provider.get_embeddings([chunk.page_content])
+                        
+                        if embeddings and len(embeddings) > 0:
+                            embedding_vector = embeddings[0]
+                            
+                            # Update the chunk with the embedding
+                            client.execute_write_query(
+                                "MATCH (c:Chunk {id: $chunk_id}) SET c.embedding = $embedding",
+                                {"chunk_id": chunk_id, "embedding": embedding_vector},
+                                timeout=get_config_value('guardrails.neo4j_timeout', 10)
+                            )
+                            
+                            logger.debug(f"Added embedding to chunk {chunk_id} (dimensions: {len(embedding_vector)})")
+                        else:
+                            logger.warning(f"Failed to generate embedding for chunk {chunk_id}")
+                            audit_store.record({
+                                "event": "ingest.chunk_embedding_failed",
+                                "chunk_id": chunk_id,
+                                "reason": "empty_embedding_result"
+                            })
+                    except Exception as embed_error:
+                        logger.error(f"Failed to generate embedding for chunk {chunk_id}: {embed_error}")
+                        audit_store.record({
+                            "event": "ingest.chunk_embedding_failed",
+                            "chunk_id": chunk_id,
+                            "error": str(embed_error)
+                        })
+                        # Continue processing - embedding failure shouldn't stop ingestion
+                
             except Exception as e:
                 logger.error(f"Failed to create Chunk {chunk_id}: {e}")
                 audit_store.record({"event":"ingest.chunk_creation_failed", "chunk_id": chunk_id, "doc_id": doc_id, "error": str(e)})
