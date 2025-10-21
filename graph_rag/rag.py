@@ -6,6 +6,7 @@ Replaces template-based approach with fully adaptive LLM-generated queries.
 import os
 import re
 import json
+import uuid
 from typing import Optional, List, Dict, Any
 from graph_rag.planner import generate_plan
 from graph_rag.retriever import Retriever
@@ -181,7 +182,7 @@ Generate the Cypher query now:"""
             "verification_action": ""
         }
 
-    def invoke(self, question: str) -> Dict[str, Any]:
+    def invoke(self, question: str, format_type: str | None = None) -> Dict[str, Any]:
         """
         Execute the complete LLM-driven RAG pipeline.
         
@@ -192,7 +193,12 @@ Generate the Cypher query now:"""
         4. Execute query safely
         5. Augment results with graph context
         6. Generate summary via LLM
-        7. Return comprehensive response
+        7. Apply formatting if requested (text/table/graph)
+        8. Return comprehensive response
+        
+        Args:
+            question: User question to process
+            format_type: Optional format type ("text", "table", "graph")
         """
         with create_pipeline_span("rag.invoke", question=question[:100]) as span:
             current_span = get_current_span()
@@ -406,13 +412,17 @@ Generate the Cypher query now:"""
                     rows=primary_rows,
                     summary=summary,
                     citations=citations,
-                    available_ids=all_chunk_ids
+                    available_ids=all_chunk_ids,
+                    format_type=format_type
                 )
                 
                 # Legacy citation verification (for backward compatibility)
                 legacy_verification = self._verify_citations(summary, all_chunk_ids, question, trace_id)
                 
                 # Step 8: Build comprehensive response
+                # Generate audit_id for tracking
+                audit_id = str(uuid.uuid4())
+                
                 response = {
                     "question": question,
                     "answer": summary,
@@ -425,7 +435,8 @@ Generate the Cypher query now:"""
                     "table": table,
                     "plan": plan.model_dump(),
                     "citation_verification": legacy_verification,
-                    "trace_id": trace_id
+                    "trace_id": trace_id,
+                    "audit_id": audit_id
                 }
                 
                 # Add formatted output if formatters are enabled

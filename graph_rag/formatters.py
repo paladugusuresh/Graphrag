@@ -232,7 +232,8 @@ class FormattersManager:
         self.enabled = FORMATTERS_ENABLED()
     
     def format_response(self, rows: List[Dict[str, Any]], summary: str, 
-                       citations: List[str], available_ids: List[str]) -> Dict[str, Any]:
+                       citations: List[str], available_ids: List[str], 
+                       format_type: str | None = None) -> Dict[str, Any]:
         """
         Format a complete response with table, graph, and citation verification.
         
@@ -241,6 +242,7 @@ class FormattersManager:
             summary: Generated summary text
             citations: List of citations from LLM
             available_ids: Available chunk/node IDs for verification
+            format_type: Optional format type ("text", "table", "graph")
             
         Returns:
             Dictionary with formatted sections and verification status
@@ -251,15 +253,31 @@ class FormattersManager:
         
         formatted = {}
         
-        # Format table
-        table_format = self.table_formatter.format_table(rows)
-        if table_format:
-            formatted["table"] = table_format
-        
-        # Format graph
-        graph_format = self.graph_formatter.format_graph(rows)
-        if graph_format:
-            formatted["graph"] = graph_format
+        # Apply format_type filtering
+        if format_type == "text":
+            # Text format: no additional formatting, just return verification
+            pass
+        elif format_type == "table":
+            # Table format: only include table formatting
+            table_format = self.table_formatter.format_table(rows)
+            if table_format:
+                formatted["table"] = table_format
+        elif format_type == "graph":
+            # Graph format: only include graph formatting
+            graph_format = self.graph_formatter.format_graph(rows)
+            if graph_format:
+                formatted["graph"] = graph_format
+        else:
+            # Default behavior: include all formats
+            # Format table
+            table_format = self.table_formatter.format_table(rows)
+            if table_format:
+                formatted["table"] = table_format
+            
+            # Format graph
+            graph_format = self.graph_formatter.format_graph(rows)
+            if graph_format:
+                formatted["graph"] = graph_format
         
         # Verify citations
         verification = self.citation_verifier.verify_citations(summary, available_ids, citations)

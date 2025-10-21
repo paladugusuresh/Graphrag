@@ -93,6 +93,7 @@ app = FastAPI(title="GraphRAG", lifespan=lifespan)
 class ChatRequest(BaseModel):
     conversation_id: str | None = None
     question: str
+    format_type: str | None = None  # Optional: "text", "table", "graph"
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
@@ -104,9 +105,14 @@ async def chat(req: ChatRequest):
     2. Running guardrail checks (synchronous)
     3. Offloading RAG chain invocation to thread pool (asynchronous)
     4. Recording conversation history
+    5. Applying format_type if requested (text/table/graph)
     
     The heavy `rag_chain.invoke` call runs in a thread pool to preserve server
     concurrency and prevent blocking other requests.
+    
+    Parameters:
+    - format_type: Optional format for response ("text", "table", "graph")
+    - Returns trace_id and audit_id for tracking
     """
     if not req.question:
         raise HTTPException(400, "Question is required")
@@ -150,10 +156,15 @@ async def chat(req: ChatRequest):
     try:
         # Offload heavy RAG processing to thread pool to preserve server concurrency
         loop = asyncio.get_running_loop()
-        resp = await loop.run_in_executor(None, rag_chain.invoke, req.question)
+        resp = await loop.run_in_executor(None, rag_chain.invoke, req.question, req.format_type)
         
         conversation_store.add_message(conv_id, {"role": "assistant", "text": resp.get("answer"), "trace_id": resp.get("trace_id")})
         resp["conversation_id"] = conv_id
+        
+        # Always include trace_id and audit_id for tracking
+        resp["trace_id"] = resp.get("trace_id", "no-trace")
+        resp["audit_id"] = resp.get("audit_id", "no-audit")
+        
         return resp
     except Exception as e:
         logger.error(f"Error in /api/chat: {e}")
