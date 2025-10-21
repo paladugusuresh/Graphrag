@@ -4,6 +4,7 @@ Simplified query planner for Student Support domain that generates intent+params
 The planner extracts intent and entities (students, staff, interventions, goals), using semantic mapping for anchor resolution.
 Aligned with Student, Goal, InterventionPlan, Referral, and CaseWorker entities.
 """
+import re
 from pydantic import BaseModel, Field
 from graph_rag.observability import get_logger, tracer, planner_latency_seconds, mapping_similarity, create_pipeline_span, add_span_attributes
 from graph_rag.llm_client import call_llm_structured, LLMStructuredError
@@ -41,6 +42,80 @@ class QueryPlan(BaseModel):
     anchor_entity: str | None = Field(default=None, description="Resolved anchor entity label")
     question: str = Field(description="Original user question")
     params: dict = Field(default_factory=dict, description="Additional parameters extracted from question")
+
+def _map_question_to_template_intent(question: str) -> str | None:
+    """
+    Map common user phrasings to template intent names using rule-based matching.
+    
+    This function recognizes frequent user phrasings and maps them to intent names
+    that match the template filenames, enabling template-based query generation.
+    
+    Args:
+        question: User question text
+        
+    Returns:
+        Template intent name if matched, None otherwise
+        
+    Template Intent Mappings:
+        - "goal(s) for" + student name → "goals_for_student"
+        - "accommodation(s) for" + student name → "accommodations_for_student"
+        - "case manager for" + student name → "case_manager_for_student"
+        - "evaluation report(s) for" + student name + "between/since" → "eval_reports_for_student_in_range"
+        - "concern area(s) for" + student name → "concern_areas_for_student"
+    """
+    if not question or not isinstance(question, str):
+        return None
+    
+    question_lower = question.lower().strip()
+    
+    # Extract student name patterns (common names and patterns)
+    student_name_patterns = [
+        r'\b([A-Z][a-z]+ [A-Z][a-z]+)\b',  # First Last
+        r'\b([A-Z][a-z]+)\b',              # Single name
+    ]
+    
+    # Rule 1: Goals for student (flexible patterns)
+    if (re.search(r'\bgoals?\b.*\bfor\b', question_lower) or 
+        re.search(r'\bgoals?\b.*\bdoes\b', question_lower) or
+        re.search(r'\bgoals?\b.*\bhave\b', question_lower)):
+        logger.debug(f"Matched 'goals' pattern in question: {question[:50]}...")
+        return "goals_for_student"
+    
+    # Rule 2: Accommodations for student (flexible patterns)
+    if (re.search(r'\baccommodations?\b.*\bfor\b', question_lower) or
+        re.search(r'\baccommodations?\b.*\bdoes\b', question_lower) or
+        re.search(r'\baccommodations?\b.*\bhave\b', question_lower)):
+        logger.debug(f"Matched 'accommodations' pattern in question: {question[:50]}...")
+        return "accommodations_for_student"
+    
+    # Rule 3: Case manager for student (flexible patterns)
+    if (re.search(r'\bcase\s+manager\b.*\bfor\b', question_lower) or
+        re.search(r'\bcase\s+manager\b.*\bdoes\b', question_lower) or
+        re.search(r'\bcase\s+manager\b.*\bhave\b', question_lower) or
+        re.search(r'\bmanages?\b.*\bcase\b', question_lower)):
+        logger.debug(f"Matched 'case manager' pattern in question: {question[:50]}...")
+        return "case_manager_for_student"
+    
+    # Rule 4: Evaluation reports for student with date range (flexible patterns)
+    if ((re.search(r'\bevaluation\s+reports?\b.*\bfor\b', question_lower) or
+         re.search(r'\bevaluation\s+reports?\b.*\bdoes\b', question_lower) or
+         re.search(r'\bevaluation\s+reports?\b.*\bhave\b', question_lower)) and 
+        (re.search(r'\bbetween\b', question_lower) or re.search(r'\bsince\b', question_lower) or 
+         re.search(r'\bfrom\b', question_lower) or re.search(r'\bto\b', question_lower))):
+        logger.debug(f"Matched 'evaluation reports' with date range pattern in question: {question[:50]}...")
+        return "eval_reports_for_student_in_range"
+    
+    # Rule 5: Concern areas for student (flexible patterns)
+    if (re.search(r'\bconcern\s+areas?\b.*\bfor\b', question_lower) or
+        re.search(r'\bconcern\s+areas?\b.*\bdoes\b', question_lower) or
+        re.search(r'\bconcern\s+areas?\b.*\bhave\b', question_lower)):
+        logger.debug(f"Matched 'concern areas' pattern in question: {question[:50]}...")
+        return "concern_areas_for_student"
+    
+    # No template intent matched
+    logger.debug(f"No template intent matched for question: {question[:50]}...")
+    return None
+
 
 def _find_best_anchor_entity_semantic(candidate: str) -> str | None:
     """
@@ -153,6 +228,60 @@ def generate_plan(question: str) -> QueryPlan:
     
     with create_pipeline_span("planner.generate_plan", question=question[:100]) as span:
         with planner_latency_seconds.time():
+            # Try rule-based template intent mapping first
+            template_intent = _map_question_to_template_intent(question)
+            if template_intent:
+                logger.info(f"Rule-based mapping matched template intent: {template_intent}")
+                add_span_attributes(span, 
+                    template_intent_matched=True,
+                    template_intent=template_intent,
+                    mapping_method="rule_based"
+                )
+                
+                # Extract student name for anchor entity
+                anchor_entity = None
+                # Look for names after "for" keyword (including titles like Dr., Mr., etc.)
+                for_match = re.search(r'\bfor\s+([A-Z][a-z]*\.?\s+[A-Z][a-z]+(?:[-][A-Z][a-z]+)*(?:\s+[A-Z][a-z]+)*)', question)
+                if for_match:
+                    anchor_entity = for_match.group(1)
+                else:
+                    # Fallback: look for any capitalized words that might be names
+                    student_name_patterns = [
+                        r'\b([A-Z][a-z]+ [A-Z][a-z]+(?:[-][A-Z][a-z]+)*(?:\s+[A-Z][a-z]+)*)\b',  # First Last (with optional middle names and hyphens)
+                    ]
+                    
+                    for pattern in student_name_patterns:
+                        matches = re.findall(pattern, question)
+                        if matches:
+                            # Take the longest match (most likely to be a full name)
+                            anchor_entity = max(matches, key=len)
+                            break
+                
+                # Build basic parameters
+                params = {}
+                if anchor_entity:
+                    params['student_name'] = anchor_entity
+                
+                # Add span attributes
+                add_span_attributes(span,
+                    anchor_entity=anchor_entity,
+                    params_count=len(params)
+                )
+                
+                return QueryPlan(
+                    intent=template_intent,
+                    anchor_entity=anchor_entity,
+                    question=question,
+                    params=params
+                )
+            
+            # No template intent matched, proceed with LLM-based planning
+            logger.debug("No template intent matched, proceeding with LLM-based planning")
+            add_span_attributes(span, 
+                template_intent_matched=False,
+                mapping_method="llm_based"
+            )
+            
             # Create prompt for LLM-driven intent classification (Student Support domain)
             prompt = f"""You are a query planner for a Student Support graph database system. Your task is to analyze the user question and identify the query intent with appropriate parameters.
 
