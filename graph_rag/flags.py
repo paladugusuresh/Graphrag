@@ -163,6 +163,17 @@ def LLM_TOLERANT_JSON_PARSER() -> bool:
     return _get_bool_flag("LLM_TOLERANT_JSON_PARSER", "flags.llm_tolerant_json_parser", False)
 
 
+def TEMPLATE_INTENTS_ENABLED() -> bool:
+    """
+    Whether to enable template-based intent matching for fast-path queries.
+    
+    Default: True (current behavior - templates enabled)
+    Environment: TEMPLATE_INTENTS_ENABLED
+    Config: flags.template_intents_enabled
+    """
+    return _get_bool_flag("TEMPLATE_INTENTS_ENABLED", "flags.template_intents_enabled", True)
+
+
 def get_all_flags() -> dict[str, Union[bool, int]]:
     """
     Get all feature flags as a dictionary for logging/debugging.
@@ -181,4 +192,5 @@ def get_all_flags() -> dict[str, Union[bool, int]]:
         "MAPPER_ENABLED": MAPPER_ENABLED(),
         "FORMATTERS_ENABLED": FORMATTERS_ENABLED(),
         "LLM_TOLERANT_JSON_PARSER": LLM_TOLERANT_JSON_PARSER(),
+        "TEMPLATE_INTENTS_ENABLED": TEMPLATE_INTENTS_ENABLED(),
     }

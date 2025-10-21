@@ -6,6 +6,7 @@ import json
 import re
 import os
 from typing import Optional, Dict, Any
+from pydantic import BaseModel, Field
 from graph_rag.observability import get_logger
 from graph_rag.config_manager import get_config_value
 
@@ -180,3 +181,224 @@ def validate_relationship_type(rel_type: str, allow_list: dict = None) -> str:
         return "`RELATED`"
     
     return f"`{rel_type}`"
+
+def generate_cypher_with_template(intent: str, params: dict) -> str | None:
+    """
+    Generate Cypher query using template if available, otherwise return None.
+    
+    Args:
+        intent: The intent name (e.g., "goals_for_student")
+        params: Parameters for the template
+        
+    Returns:
+        Cypher query string if template exists and params are valid, None otherwise
+    """
+    if not intent or not isinstance(intent, str):
+        logger.debug("Invalid intent provided for template generation")
+        return None
+    
+    # Try to load template
+    template_content = try_load_template(intent)
+    if not template_content:
+        logger.debug(f"No template available for intent: {intent}")
+        return None
+    
+    # Validate parameters
+    if not _validate_template_params(template_content, params, intent):
+        logger.warning(f"Parameter validation failed for intent: {intent}")
+        return None
+    
+    logger.info(f"Generated Cypher from template for intent: {intent}")
+    return template_content
+
+
+def _validate_template_params(template_content: str, params: dict, intent: str) -> bool:
+    """
+    Validate that all required parameters are provided for a template.
+    
+    Args:
+        template_content: The Cypher template content
+        params: Parameters provided
+        intent: Intent name for logging
+        
+    Returns:
+        True if all required parameters are provided, False otherwise
+    """
+    try:
+        # Extract parameter placeholders from template ($param)
+        param_pattern = r'\$(\w+)'
+        required_params = set(re.findall(param_pattern, template_content))
+        
+        # Check if all required parameters are provided
+        provided_params = set(params.keys())
+        missing_params = required_params - provided_params
+        
+        if missing_params:
+            logger.warning(f"Template for intent '{intent}' missing required parameters: {missing_params}")
+            return False
+        
+        logger.debug(f"Parameter validation passed for intent: {intent}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Parameter validation error for intent '{intent}': {e}")
+        return False
+
+
+def generate_cypher_with_llm(intent: str, params: dict, question: str) -> str:
+    """
+    Generate Cypher query using LLM with strict parameterization enforcement.
+    
+    Args:
+        intent: The intent name
+        params: Parameters extracted from the question
+        question: Original user question
+        
+    Returns:
+        Generated Cypher query string
+        
+    Raises:
+        RuntimeError: If LLM generation fails or produces invalid Cypher
+    """
+    from graph_rag.llm_client import call_llm_structured
+    from graph_rag.audit_store import audit_store
+    
+    # Create a structured prompt that enforces parameterization
+    prompt = f"""You are a Cypher query generator for a Student Support graph database. Generate a safe, parameterized Cypher query.
+
+Intent: {intent}
+Question: {question}
+Parameters: {params}
+
+CRITICAL REQUIREMENTS:
+1. Use ONLY parameter placeholders ($param) for user data - NEVER use string literals
+2. Use ONLY labels and relationships from the allow-list
+3. Include LIMIT clause to prevent resource exhaustion
+4. Use only read operations (MATCH, RETURN, WHERE, ORDER BY, LIMIT)
+5. Validate all labels and relationships against the schema
+
+ALLOWED NODE LABELS: Student, Goal, Plan, Intervention, CaseWorker, Referral, Evaluation, Accommodation, ConcernArea
+ALLOWED RELATIONSHIPS: HAS_PLAN, HAS_GOAL, HAS_INTERVENTION, HAS_REFERRAL, HAS_EVALUATION, HAS_ACCOMMODATION, HAS_CONCERN, MANAGES_CASE
+
+EXAMPLE GOOD QUERY:
+MATCH (s:Student {{fullName: $student_name}})-[:HAS_PLAN]->(:Plan)-[:HAS_GOAL]->(g:Goal)
+RETURN g.title AS goal, g.status AS status
+ORDER BY g.title
+LIMIT $limit
+
+EXAMPLE BAD QUERY (REJECTED):
+MATCH (s:Student {{fullName: 'John Doe'}})-[:HAS_PLAN]->(:Plan)-[:HAS_GOAL]->(g:Goal)
+RETURN g.title AS goal, g.status AS status
+ORDER BY g.title
+LIMIT 20
+
+Generate the Cypher query:"""
+
+    try:
+        # Use a simple response model for Cypher generation
+        from pydantic import BaseModel
+        
+        class CypherResponse(BaseModel):
+            cypher: str = Field(description="Generated Cypher query")
+            explanation: str = Field(description="Brief explanation of the query")
+        
+        response = call_llm_structured(
+            prompt=prompt,
+            schema_model=CypherResponse,
+            model=None,  # Use default model
+            max_tokens=512,
+            force_json_mode=True,
+            force_temperature_zero=True
+        )
+        
+        cypher_query = response.cypher.strip()
+        
+        # Validate the generated Cypher
+        if not _validate_generated_cypher(cypher_query, params, intent):
+            error_msg = f"LLM generated invalid Cypher for intent: {intent}"
+            logger.error(error_msg)
+            audit_store.record({
+                "event": "cypher_generation_failed",
+                "reason": "invalid_cypher_generated",
+                "intent": intent,
+                "cypher_preview": cypher_query[:100],
+                "question_preview": question[:100]
+            })
+            raise RuntimeError(error_msg)
+        
+        logger.info(f"Generated Cypher from LLM for intent: {intent}")
+        return cypher_query
+        
+    except Exception as e:
+        error_msg = f"LLM Cypher generation failed for intent '{intent}': {e}"
+        logger.error(error_msg)
+        audit_store.record({
+            "event": "cypher_generation_failed",
+            "reason": "llm_generation_error",
+            "intent": intent,
+            "error": str(e),
+            "question_preview": question[:100]
+        })
+        raise RuntimeError(error_msg) from e
+
+
+def _validate_generated_cypher(cypher: str, params: dict, intent: str) -> bool:
+    """
+    Validate that generated Cypher uses proper parameterization and schema compliance.
+    
+    Args:
+        cypher: Generated Cypher query
+        params: Expected parameters
+        intent: Intent name for logging
+        
+    Returns:
+        True if Cypher is valid, False otherwise
+    """
+    try:
+        # Check for string literals (should use parameters instead)
+        string_literal_pattern = r"['\"][^'\"]*['\"]"
+        literals = re.findall(string_literal_pattern, cypher)
+        
+        # Filter out allowed literals (empty strings, numbers, etc.)
+        problematic_literals = []
+        for literal in literals:
+            # Allow empty strings, numbers, and common keywords
+            if literal not in ['""', "''", '"0"', '"1"', '"true"', '"false"', '"asc"', '"desc"']:
+                # Check if this looks like user data (names, etc.)
+                if len(literal) > 2 and not literal.replace('"', '').replace("'", '').isdigit():
+                    problematic_literals.append(literal)
+        
+        if problematic_literals:
+            logger.warning(f"Generated Cypher for intent '{intent}' contains string literals: {problematic_literals}")
+            return False
+        
+        # Check for required parameters
+        param_pattern = r'\$(\w+)'
+        used_params = set(re.findall(param_pattern, cypher))
+        provided_params = set(params.keys())
+        
+        # Check if all used parameters are provided
+        missing_params = used_params - provided_params
+        if missing_params:
+            logger.warning(f"Generated Cypher for intent '{intent}' uses undefined parameters: {missing_params}")
+            return False
+        
+        # Basic safety checks
+        cypher_upper = cypher.upper()
+        write_operations = ['CREATE', 'DELETE', 'SET', 'REMOVE', 'MERGE', 'DROP']
+        for op in write_operations:
+            if op in cypher_upper:
+                logger.warning(f"Generated Cypher for intent '{intent}' contains write operation '{op}'")
+                return False
+        
+        # Check for LIMIT clause
+        if 'LIMIT' not in cypher_upper:
+            logger.warning(f"Generated Cypher for intent '{intent}' missing LIMIT clause")
+            return False
+        
+        logger.debug(f"Generated Cypher validation passed for intent: {intent}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Generated Cypher validation error for intent '{intent}': {e}")
+        return False

@@ -221,51 +221,44 @@ Generate the Cypher query now:"""
                     try:
                         allow_list = get_allow_list()
                         
-                        # Try to load template first for known intents
-                        template_cypher = None
-                        template_params = {}
+                        # Try template-based generation first
+                        from graph_rag.cypher_generator import generate_cypher_with_template, generate_cypher_with_llm
                         
-                        if plan.intent in ["goals_for_student", "accommodations_for_student", "case_manager_for_student", 
-                                         "eval_reports_for_student_in_range", "concern_areas_for_student"]:
-                            from graph_rag.cypher_generator import try_load_template
-                            template_cypher = try_load_template(plan.intent)
-                            
-                            if template_cypher:
-                                # Build parameters for template
-                                template_params = self._build_template_params(plan, template_cypher)
-                                logger.info(f"Using template for intent '{plan.intent}'")
-                                add_span_attributes(cypher_span,
-                                    template_used=True,
-                                    intent=plan.intent,
-                                    params_count=len(template_params)
-                                )
-                                cypher_span.set_attribute("template_used", True)
-                                cypher_span.set_attribute("intent", plan.intent)
+                        template_cypher = generate_cypher_with_template(plan.intent, plan.params)
                         
                         if template_cypher:
-                            # Use template
+                            # Use template with validated parameters
                             cypher_output = CypherGenerationOutput(
                                 cypher=template_cypher,
-                                params=template_params
+                                params=plan.params
                             )
-                            logger.info(f"Template Cypher used: {template_cypher[:100]}...")
-                        else:
-                            # Fall back to LLM generation
-                            cypher_prompt = self._build_cypher_generation_prompt(plan, allow_list)
-                            
-                            cypher_output = call_llm_structured(
-                                prompt=cypher_prompt,
-                                schema_model=CypherGenerationOutput
-                            )
-                            
-                            logger.info(f"LLM Cypher generated: {cypher_output.cypher[:100]}...")
+                            logger.info(f"Template Cypher used for intent '{plan.intent}': {template_cypher[:100]}...")
                             add_span_attributes(cypher_span,
-                                template_used=False,
-                                cypher_generated=cypher_output.cypher[:100],
-                                params_count=len(cypher_output.params)
+                                template_used=True,
+                                intent=plan.intent,
+                                params_count=len(plan.params)
                             )
-                            cypher_span.set_attribute("template_used", False)
-                            cypher_span.set_attribute("cypher_generated", cypher_output.cypher[:100])
+                            cypher_span.set_attribute("template_used", True)
+                            cypher_span.set_attribute("intent", plan.intent)
+                        else:
+                            # Fall back to LLM generation with strict parameterization
+                            try:
+                                llm_cypher = generate_cypher_with_llm(plan.intent, plan.params, plan.question)
+                                cypher_output = CypherGenerationOutput(
+                                    cypher=llm_cypher,
+                                    params=plan.params
+                                )
+                                logger.info(f"LLM Cypher generated for intent '{plan.intent}': {llm_cypher[:100]}...")
+                                add_span_attributes(cypher_span,
+                                    template_used=False,
+                                    cypher_generated=llm_cypher[:100],
+                                    params_count=len(plan.params)
+                                )
+                                cypher_span.set_attribute("template_used", False)
+                                cypher_span.set_attribute("cypher_generated", llm_cypher[:100])
+                            except RuntimeError as e:
+                                logger.error(f"LLM Cypher generation failed: {e}")
+                                raise LLMStructuredError(f"LLM Cypher generation failed: {e}") from e
                         
                         add_span_attributes(cypher_span,
                             cypher_generated=cypher_output.cypher[:100],

@@ -44,6 +44,45 @@ def _mask_string_literals(text: str) -> str:
     # This regex handles escaped quotes inside strings
     return re.sub(r"('([^'\\]|\\.)*'|\"([^\"\\]|\\.)*\")", "''", text)
 
+def _validate_parameterization(cypher: str) -> bool:
+    """
+    Validate that Cypher query uses proper parameterization instead of string literals.
+    
+    Args:
+        cypher: The Cypher query string to validate
+        
+    Returns:
+        True if query uses proper parameterization, False otherwise
+    """
+    if not cypher or not cypher.strip():
+        return True  # Empty queries are valid
+    
+    # Find all string literals
+    string_literal_pattern = r"['\"]([^'\"]*)['\"]"
+    literals = re.findall(string_literal_pattern, cypher)
+    
+    # Filter out allowed literals (empty strings, numbers, keywords)
+    allowed_literals = {'', '0', '1', 'true', 'false', 'asc', 'desc', 'ascending', 'descending'}
+    problematic_literals = []
+    
+    for literal in literals:
+        # Allow empty strings, numbers, and common keywords
+        if literal not in allowed_literals:
+            # Check if this looks like user data (names, etc.)
+            if len(literal) > 2 and not literal.isdigit():
+                # Check if it's a common name pattern (First Last)
+                if re.match(r'^[A-Z][a-z]+ [A-Z][a-z]+', literal):
+                    problematic_literals.append(literal)
+                # Check if it's a single name that could be a person
+                elif re.match(r'^[A-Z][a-z]+$', literal) and len(literal) > 3:
+                    problematic_literals.append(literal)
+    
+    if problematic_literals:
+        logger.debug(f"Found problematic string literals: {problematic_literals}")
+        return False
+    
+    return True
+
 def extract_labels(cypher: str) -> List[str]:
     """
     Extract node labels from Cypher query using conservative regex.
@@ -272,7 +311,20 @@ def validate_cypher(cypher: str) -> Tuple[bool, Dict[str, Any]]:
         # Merge variable_length_patterns from depth check
         details["variable_length_patterns"] = depth_details.get("variable_length_patterns", [])
 
-        # 4. Load allow list
+        # 4. Check for string literals that should be parameters
+        if not _validate_parameterization(cypher):
+            reason = "parameterization_violation"
+            logger.warning(f"Cypher validation failed. Query contains string literals that should use parameters")
+            cypher_validation_failures.inc()
+            audit_store.record({
+                "event": "cypher_validation_failed",
+                "reason": reason,
+                "cypher_preview": cypher[:200]
+            })
+            details["blocked_reason"] = "Query contains string literals that should use parameters ($param)"
+            return False, details
+
+        # 5. Load allow list
         allow_list = load_allow_list()
         allow_list_labels = set(allow_list.get("node_labels", []))
         allow_list_rels = set(allow_list.get("relationship_types", []))

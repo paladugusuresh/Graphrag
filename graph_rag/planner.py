@@ -11,7 +11,7 @@ from graph_rag.llm_client import call_llm_structured, LLMStructuredError
 from graph_rag.cypher_generator import validate_label, load_allow_list
 from graph_rag.semantic_mapper import map_term, get_best_match, SynonymMapper
 from graph_rag.config_manager import get_config_value
-from graph_rag.flags import MAPPER_ENABLED
+from graph_rag.flags import MAPPER_ENABLED, TEMPLATE_INTENTS_ENABLED
 
 logger = get_logger(__name__)
 
@@ -42,6 +42,38 @@ class QueryPlan(BaseModel):
     anchor_entity: str | None = Field(default=None, description="Resolved anchor entity label")
     question: str = Field(description="Original user question")
     params: dict = Field(default_factory=dict, description="Additional parameters extracted from question")
+
+def _extract_student_name(question: str) -> str | None:
+    """
+    Extract student name from a question using pattern matching.
+    
+    Args:
+        question: User question text
+        
+    Returns:
+        Student name if found, None otherwise
+    """
+    if not question or not isinstance(question, str):
+        return None
+    
+    # Look for names after "for" keyword (including titles like Dr., Mr., etc.)
+    for_match = re.search(r'\bfor\s+([A-Z][a-z]*\.?\s+[A-Z][a-z]+(?:[-][A-Z][a-z]+)*(?:\s+[A-Z][a-z]+)*)', question)
+    if for_match:
+        return for_match.group(1)
+    
+    # Fallback: look for any capitalized words that might be names
+    student_name_patterns = [
+        r'\b([A-Z][a-z]+ [A-Z][a-z]+(?:[-][A-Z][a-z]+)*(?:\s+[A-Z][a-z]+)*)\b',  # First Last (with optional middle names and hyphens)
+    ]
+    
+    for pattern in student_name_patterns:
+        matches = re.findall(pattern, question)
+        if matches:
+            # Take the longest match (most likely to be a full name)
+            return max(matches, key=len)
+    
+    return None
+
 
 def _map_question_to_template_intent(question: str) -> str | None:
     """
@@ -229,7 +261,10 @@ def generate_plan(question: str) -> QueryPlan:
     with create_pipeline_span("planner.generate_plan", question=question[:100]) as span:
         with planner_latency_seconds.time():
             # Try rule-based template intent mapping first
-            template_intent = _map_question_to_template_intent(question)
+            template_intent = None
+            if TEMPLATE_INTENTS_ENABLED():
+                template_intent = _map_question_to_template_intent(question)
+            
             if template_intent:
                 logger.info(f"Rule-based mapping matched template intent: {template_intent}")
                 add_span_attributes(span, 
@@ -238,34 +273,24 @@ def generate_plan(question: str) -> QueryPlan:
                     mapping_method="rule_based"
                 )
                 
-                # Extract student name for anchor entity
-                anchor_entity = None
-                # Look for names after "for" keyword (including titles like Dr., Mr., etc.)
-                for_match = re.search(r'\bfor\s+([A-Z][a-z]*\.?\s+[A-Z][a-z]+(?:[-][A-Z][a-z]+)*(?:\s+[A-Z][a-z]+)*)', question)
-                if for_match:
-                    anchor_entity = for_match.group(1)
-                else:
-                    # Fallback: look for any capitalized words that might be names
-                    student_name_patterns = [
-                        r'\b([A-Z][a-z]+ [A-Z][a-z]+(?:[-][A-Z][a-z]+)*(?:\s+[A-Z][a-z]+)*)\b',  # First Last (with optional middle names and hyphens)
-                    ]
-                    
-                    for pattern in student_name_patterns:
-                        matches = re.findall(pattern, question)
-                        if matches:
-                            # Take the longest match (most likely to be a full name)
-                            anchor_entity = max(matches, key=len)
-                            break
-                
-                # Build basic parameters
+                # Extract parameters based on template intent
                 params = {}
-                if anchor_entity:
-                    params['student_name'] = anchor_entity
+                anchor_entity = None
+                
+                if template_intent == "goals_for_student":
+                    # Extract student name for goals_for_student template
+                    student_name = _extract_student_name(question)
+                    if student_name:
+                        params['student'] = student_name
+                        params['limit'] = 20  # Default limit
+                        anchor_entity = student_name
+                        logger.info(f"Extracted student name for goals template: {student_name}")
                 
                 # Add span attributes
                 add_span_attributes(span,
                     anchor_entity=anchor_entity,
-                    params_count=len(params)
+                    params_count=len(params),
+                    template_params=params
                 )
                 
                 return QueryPlan(
