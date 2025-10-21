@@ -20,6 +20,7 @@ from graph_rag.query_executor import safe_execute
 from graph_rag.rag_augmentor import augment_results
 from graph_rag.response_formatter import build_summary_prompt, rows_to_table
 from graph_rag.schema_manager import get_allow_list
+from graph_rag.formatters import formatters_manager
 
 logger = get_logger(__name__)
 
@@ -286,9 +287,19 @@ Generate the Cypher query now:"""
                         citations = []
                         table = rows_to_table(primary_rows) if primary_rows else []
                 
-                # Step 7: Verify citations
+                # Step 7: Apply formatters and verify citations
                 all_chunk_ids = [s.get('id', '') for s in snippets] + primary_ids
-                verification = self._verify_citations(summary, all_chunk_ids, question, trace_id)
+                
+                # Use formatters manager for comprehensive formatting
+                formatting_result = formatters_manager.format_response(
+                    rows=primary_rows,
+                    summary=summary,
+                    citations=citations,
+                    available_ids=all_chunk_ids
+                )
+                
+                # Legacy citation verification (for backward compatibility)
+                legacy_verification = self._verify_citations(summary, all_chunk_ids, question, trace_id)
                 
                 # Step 8: Build comprehensive response
                 response = {
@@ -302,9 +313,15 @@ Generate the Cypher query now:"""
                     "citations": citations,
                     "table": table,
                     "plan": plan.model_dump(),
-                    "citation_verification": verification,
+                    "citation_verification": legacy_verification,
                     "trace_id": trace_id
                 }
+                
+                # Add formatted output if formatters are enabled
+                if formatting_result:
+                    response["formatted"] = formatting_result["formatted"]
+                    response["verification_status"] = formatting_result["verification_status"]
+                    response["citation_details"] = formatting_result["citation_details"]
                 
                 logger.info(f"RAG pipeline completed successfully for question: {question}")
                 return response

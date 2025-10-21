@@ -141,6 +141,17 @@ def MAPPER_ENABLED() -> bool:
     return _get_bool_flag("MAPPER_ENABLED", "flags.mapper_enabled", True)
 
 
+def FORMATTERS_ENABLED() -> bool:
+    """
+    Whether to enable table and graph formatters with citation verification.
+    
+    Default: False (current behavior - no formatters)
+    Environment: FORMATTERS_ENABLED
+    Config: flags.formatters_enabled
+    """
+    return _get_bool_flag("FORMATTERS_ENABLED", "flags.formatters_enabled", False)
+
+
 def get_all_flags() -> dict[str, Union[bool, int]]:
     """
     Get all feature flags as a dictionary for logging/debugging.
@@ -157,4 +168,5 @@ def get_all_flags() -> dict[str, Union[bool, int]]:
         "RETRIEVAL_CHUNK_EMBEDDINGS_ENABLED": RETRIEVAL_CHUNK_EMBEDDINGS_ENABLED(),
         "RETRIEVAL_TOPK": RETRIEVAL_TOPK(),
         "MAPPER_ENABLED": MAPPER_ENABLED(),
+        "FORMATTERS_ENABLED": FORMATTERS_ENABLED(),
     }
