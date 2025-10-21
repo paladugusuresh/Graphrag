@@ -2,12 +2,11 @@
 from pydantic import BaseModel
 from graph_rag.llm_client import call_llm_structured, LLMStructuredError
 from graph_rag.sanitizer import sanitize_text
-from graph_rag.observability import (
-    get_logger, guardrail_blocks_total, guardrail_validation_errors_total,
-    guardrail_dev_bypass_total, create_pipeline_span, add_span_attributes
-)
+from graph_rag.observability import get_logger, guardrail_blocks_total, create_pipeline_span, add_span_attributes
 from graph_rag.audit_store import audit_store
-from graph_rag.flags import GUARDRAILS_FAIL_CLOSED_DEV
+from graph_rag.flags import GUARDRAILS_FAIL_CLOSED_DEV, LLM_TOLERANT_JSON_PARSER
+from graph_rag.json_utils import tolerant_json_parse, normalize_guardrail_response
+from graph_rag.config_manager import get_config_value
 from opentelemetry.trace import get_current_span
 
 logger = get_logger(__name__)
@@ -88,9 +87,58 @@ Respond with your classification:"""
     except LLMStructuredError as e:
         # Check if we should fail closed (production) or open (development)
         fail_closed = GUARDRAILS_FAIL_CLOSED_DEV()
+        tolerant_parser_enabled = LLM_TOLERANT_JSON_PARSER()
         
-        # Record validation error metric
-        guardrail_validation_errors_total.labels(error_type="llm_structured_error").inc()
+        # Try tolerant parsing if enabled and we're in dev mode
+        if not fail_closed and tolerant_parser_enabled:
+            logger.info("Attempting tolerant JSON parsing for guardrail response")
+            try:
+                # Extract the raw response from the LLM call
+                # We need to make a raw call to get the unparsed response
+                from graph_rag.llm_client import call_llm_raw
+                raw_response = call_llm_raw(
+                    prompt=prompt,
+                    model=get_config_value('llm.model', 'gemini-2.0-flash-exp'),
+                    max_tokens=100,
+                    temperature=0.0,
+                    json_mode=True
+                )
+                
+                # Try tolerant parsing
+                parsed_data = tolerant_json_parse(raw_response, schema_type="guardrail")
+                if parsed_data:
+                    # Normalize the response
+                    normalized = normalize_guardrail_response(parsed_data)
+                    
+                    # Create a GuardrailResponse object
+                    response = GuardrailResponse(
+                        allowed=normalized.get('allowed', False),
+                        reason=normalized.get('reason', 'Tolerant parsing applied')
+                    )
+                    
+                    logger.info(f"Guardrail tolerant parsing succeeded - Question: {sanitized_question[:50]}... | Allowed: {response.allowed} | Reason: {response.reason}")
+                    
+                    add_span_attributes(span,
+                        allowed=response.allowed,
+                        reason=response.reason,
+                        sanitized_question=sanitized_question[:100],
+                        tolerant_parsing_used=True
+                    )
+                    
+                    # Audit log the tolerant parsing success
+                    audit_store.record({
+                        "event": "guardrail_tolerant_parsing_success",
+                        "reason": "Tolerant JSON parsing succeeded",
+                        "question_preview": sanitized_question[:100],
+                        "trace_id": trace_id,
+                        "tolerant_parser_enabled": True
+                    })
+                    
+                    return response.allowed
+                else:
+                    logger.warning("Tolerant parsing also failed, falling back to dev bypass")
+            except Exception as tolerant_error:
+                logger.warning(f"Tolerant parsing failed: {tolerant_error}, falling back to dev bypass")
         
         if fail_closed:
             # Production mode: Fail closed - block on LLM errors
@@ -122,9 +170,6 @@ Respond with your classification:"""
             logger.warning(f"Guardrail LLM classification failed (FAIL_OPEN/DEV): {e}")
             logger.warning(f"Allowing question despite classification failure (DEV mode): {sanitized_question[:50]}...")
             
-            # Record dev bypass metric
-            guardrail_dev_bypass_total.labels(reason="llm_classification_error").inc()
-            
             add_span_attributes(span,
                 allowed=True,
                 reason="dev_mode_fail_open",
@@ -147,17 +192,13 @@ Respond with your classification:"""
         # Any other error - block for safety
         logger.error(f"Unexpected error in guardrail check: {e}")
         
-        # Record validation error metric
-        guardrail_validation_errors_total.labels(error_type="unexpected_error").inc()
-        
         # Audit log unexpected error
         audit_store.record({
-            "event": "guardrail_unexpected_error",
-            "reason": "unexpected_exception",
+            "event": "guardrail_error",
+            "reason": "Unexpected error",
             "error": str(e),
             "question_preview": sanitized_question[:100],
             "trace_id": trace_id
         })
-        guardrail_blocks_total.labels(reason="unexpected_error").inc()
-        add_span_attributes(span, allowed=False, reason="unexpected_error", error=str(e))
+        
         return False

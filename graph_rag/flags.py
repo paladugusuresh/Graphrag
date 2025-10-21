@@ -154,12 +154,9 @@ def FORMATTERS_ENABLED() -> bool:
 
 def LLM_TOLERANT_JSON_PARSER() -> bool:
     """
-    Whether to enable tolerant JSON parsing for LLM responses in development.
+    Whether to enable tolerant JSON parsing for development mode.
     
-    This parser extracts JSON from text and normalizes common variations.
-    Only active when enabled - strict parsing in production.
-    
-    Default: False (current behavior - strict JSON parsing only)
+    Default: False (current behavior - strict JSON validation)
     Environment: LLM_TOLERANT_JSON_PARSER
     Config: flags.llm_tolerant_json_parser
     """

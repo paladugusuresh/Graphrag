@@ -4,16 +4,13 @@ import time
 import json
 from typing import Optional
 from pydantic import BaseModel, ValidationError
-from graph_rag.observability import (
-    get_logger, tracer, llm_calls_total,
-    llm_json_parse_failures_total, llm_retry_attempts_total
-)
+from graph_rag.observability import get_logger, tracer, llm_calls_total
 from graph_rag.audit_store import audit_store
 from graph_rag.config_manager import get_config_value
 from graph_rag.dev_stubs import get_redis_client as get_redis_client_stub
 from graph_rag.flags import LLM_JSON_MODE_ENABLED, LLM_RATE_LIMIT_PER_MIN, LLM_TOLERANT_JSON_PARSER
+from graph_rag.json_utils import tolerant_json_parse, log_json_parse_error, redact_sensitive_content
 from graph_rag.rate_limit import rate_limited_llm, RateLimitExceeded
-from graph_rag.json_utils import parse_json_tolerant, redact_for_logging
 from opentelemetry.trace import get_current_span
 
 logger = get_logger(__name__)
@@ -193,10 +190,6 @@ def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None,
     - Sets temperature=0 for deterministic results
     - Retries up to 2 times on validation failures
     
-    With LLM_TOLERANT_JSON_PARSER=true (dev mode):
-    - Attempts to extract and normalize JSON from malformed responses
-    - Only active when explicitly enabled
-    
     Rate limiting is enforced at the call_llm_raw level via @rate_limited_llm decorator.
     
     Args:
@@ -212,8 +205,8 @@ def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None,
     # Check feature flags
     json_mode_enabled = LLM_JSON_MODE_ENABLED()
     tolerant_parser_enabled = LLM_TOLERANT_JSON_PARSER()
-    temperature = 0.0  # Always 0 for structured output (deterministic)
-    max_retries = 2 if json_mode_enabled else 0  # Retry only when JSON mode is enabled
+    temperature = 0.0  # Always 0 for deterministic structured output
+    max_retries = 2  # Always retry up to 2 times for structured calls
     
     # Build structured prompt with explicit JSON requirements
     structured_prompt = _build_structured_prompt(prompt, schema_model, example_structure)
@@ -221,11 +214,6 @@ def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None,
     last_error = None
     for attempt in range(max_retries + 1):
         try:
-            # Record retry attempts for observability
-            if attempt > 0:
-                llm_retry_attempts_total.labels(retry_number=str(attempt)).inc()
-                logger.info(f"LLM retry attempt {attempt + 1}/{max_retries + 1}")
-            
             # Call LLM with JSON mode if enabled
             # Note: Rate limiting is enforced by @rate_limited_llm decorator on call_llm_raw
             response = call_llm_raw(
@@ -236,50 +224,53 @@ def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None,
                 json_mode=json_mode_enabled
             )
 
-            # Try to parse JSON with strict parser first
+            # Try to parse JSON with tolerance if enabled
             parsed = None
-            parse_error = None
+            json_parse_error = None
             
             try:
+                # First try standard JSON parsing
                 parsed = json.loads(response)
             except json.JSONDecodeError as e:
-                parse_error = e
-                llm_json_parse_failures_total.labels(parser_type="strict").inc()
+                json_parse_error = e
                 
-                # Try tolerant parser if enabled
+                # If tolerant parser is enabled, try tolerant parsing
                 if tolerant_parser_enabled:
-                    try:
-                        # For guardrail responses, enable normalization
-                        is_guardrail = "GuardrailResponse" in schema_model.__name__ or "Classification" in schema_model.__name__
-                        parsed = parse_json_tolerant(response, normalize_guardrail=is_guardrail)
-                        logger.info(f"Tolerant JSON parser succeeded where strict parser failed")
-                    except ValueError as tolerant_error:
-                        llm_json_parse_failures_total.labels(parser_type="tolerant").inc()
-                        logger.warning(f"Both strict and tolerant JSON parsing failed: {tolerant_error}")
-                        parse_error = tolerant_error
+                    logger.debug("Standard JSON parsing failed, trying tolerant parser")
+                    parsed = tolerant_json_parse(response, schema_type="general")
+                    
+                    if parsed is not None:
+                        logger.info("Tolerant JSON parser succeeded")
+                    else:
+                        logger.warning("Tolerant JSON parser also failed")
+                else:
+                    logger.debug("Tolerant parser disabled, skipping tolerant parsing")
+            
+            # If parsing failed completely, handle retry or error
+            if parsed is None:
+                if attempt < max_retries:
+                    logger.warning(f"LLM returned non-JSON (attempt {attempt + 1}/{max_retries + 1}), retrying...")
+                    if json_parse_error:
+                        log_json_parse_error(response, json_parse_error, f"attempt {attempt + 1}")
+                    last_error = json_parse_error or Exception("JSON parsing failed")
+                    continue
                 
-                # If still no parsed data, handle retry or failure
-                if parsed is None:
-                    if attempt < max_retries:
-                        logger.warning(f"LLM returned non-JSON (attempt {attempt + 1}/{max_retries + 1}), retrying...")
-                        last_error = parse_error
-                        continue
-                    
-                    # Log redacted raw output for debugging
-                    redacted_response = redact_for_logging(response)
-                    logger.error(f"LLM returned non-JSON after all attempts. Raw output (redacted, ≤512 chars): {redacted_response}")
-                    
-                    span = get_current_span()
-                    audit_store.record(entry={
-                        "type": "llm_parse_failure", 
-                        "prompt": structured_prompt[:200],  # Truncate prompt
-                        "response_preview": redacted_response, 
-                        "error": str(parse_error), 
-                        "schema_model": schema_model.__name__,
-                        "attempts": attempt + 1,
-                        "trace_id": str(span.context.trace_id) if span and span.is_recording() else None
-                    })
-                    raise LLMStructuredError("Invalid JSON from LLM after all parse attempts") from parse_error
+                # Final attempt failed - log and raise error
+                redacted_response = redact_sensitive_content(response)
+                logger.error(f"LLM returned non-JSON after all retries: {redacted_response}")
+                
+                span = get_current_span()
+                audit_store.record(entry={
+                    "type": "llm_parse_failure", 
+                    "prompt": structured_prompt[:200],  # Truncate prompt for audit
+                    "response": redacted_response, 
+                    "error": str(json_parse_error) if json_parse_error else "JSON parsing failed",
+                    "schema_model": schema_model.__name__,
+                    "attempts": attempt + 1,
+                    "tolerant_parser_enabled": tolerant_parser_enabled,
+                    "trace_id": str(span.context.trace_id) if span and span.is_recording() else None
+                })
+                raise LLMStructuredError("Invalid JSON from LLM") from (json_parse_error or Exception("JSON parsing failed"))
 
             # Validate against schema
             try:
@@ -294,16 +285,16 @@ def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None,
                     continue
                 
                 logger.warning(f"LLM output failed validation for schema {schema_model.__name__}: {e}")
-                redacted_response = redact_for_logging(response)
-                
                 span = get_current_span()
+                redacted_response = redact_sensitive_content(response)
                 audit_store.record(entry={
                     "type": "llm_validation_failed", 
-                    "prompt": structured_prompt[:200],  # Truncate prompt
-                    "response_preview": redacted_response, 
+                    "prompt": structured_prompt[:200],  # Truncate prompt for audit
+                    "response": redacted_response, 
                     "error": str(e), 
                     "schema_model": schema_model.__name__,
                     "attempts": attempt + 1,
+                    "tolerant_parser_enabled": tolerant_parser_enabled,
                     "trace_id": str(span.context.trace_id) if span and span.is_recording() else None
                 })
                 raise LLMStructuredError("Structured output failed validation") from e

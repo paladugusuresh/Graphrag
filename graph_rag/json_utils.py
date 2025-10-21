@@ -1,250 +1,274 @@
 # graph_rag/json_utils.py
 """
-Tolerant JSON parsing utilities for LLM responses.
+Tolerant JSON parsing utilities for development mode.
 
-This module provides robust JSON extraction and normalization for LLM responses
-that may contain malformed JSON or additional text around the JSON object.
-
-Only active when LLM_TOLERANT_JSON_PARSER flag is enabled.
+This module provides a tolerant JSON parser that can extract and normalize
+JSON objects from LLM text output, useful for development when LLMs may
+return malformed or non-standard JSON responses.
 """
 
 import json
 import re
-from typing import Any, Optional
-from .observability import get_logger
+import logging
+from typing import Any, Dict, Optional, Tuple
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
-def extract_json_from_text(text: str) -> Optional[str]:
+def extract_first_json(text: str) -> Optional[Dict[str, Any]]:
     """
-    Extract the first JSON object or array from text.
-    
-    This function attempts to find and extract a complete JSON object {} or array []
-    from text that may contain additional content before or after the JSON.
+    Extract the first JSON object from text.
     
     Args:
-        text: Text that may contain JSON
+        text: Input text that may contain JSON
         
     Returns:
-        Extracted JSON string, or None if no valid JSON found
-        
-    Examples:
-        >>> extract_json_from_text('Here is the data: {"key": "value"}')
-        '{"key": "value"}'
-        
-        >>> extract_json_from_text('```json\\n{"key": "value"}\\n```')
-        '{"key": "value"}'
+        First JSON object found, or None if none found
     """
     if not text or not isinstance(text, str):
         return None
     
-    # Remove markdown code fences if present
-    text = re.sub(r'```(?:json)?\s*\n', '', text)
-    text = re.sub(r'\n```\s*$', '', text)
+    # Look for JSON object patterns
+    json_patterns = [
+        r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}',  # Simple nested objects
+        r'\{[^{}]*\}',  # Simple objects without nesting
+        r'\{.*?\}',  # Greedy match for objects
+    ]
     
-    # Try to find JSON object
-    # Look for balanced braces
-    brace_start = text.find('{')
-    bracket_start = text.find('[')
+    for pattern in json_patterns:
+        matches = re.findall(pattern, text, re.DOTALL)
+        for match in matches:
+            try:
+                # Try to parse as JSON
+                parsed = json.loads(match)
+                if isinstance(parsed, dict):
+                    logger.debug(f"Extracted JSON object: {match[:100]}...")
+                    return parsed
+            except json.JSONDecodeError:
+                continue
     
-    # Determine which comes first
-    if brace_start == -1 and bracket_start == -1:
-        return None
+    # If no complete JSON found, try to fix common issues
+    # Look for opening brace and try to add closing brace
+    start_idx = text.find('{')
+    if start_idx != -1:
+        # Find the last quote or comma before end of string
+        remaining = text[start_idx:]
+        # Try to add closing brace
+        try:
+            fixed_json = remaining + '}'
+            parsed = json.loads(fixed_json)
+            if isinstance(parsed, dict):
+                logger.debug(f"Fixed JSON by adding closing brace: {fixed_json[:100]}...")
+                return parsed
+        except json.JSONDecodeError:
+            pass
     
-    if brace_start == -1:
-        start_char = '['
-        end_char = ']'
-        start_pos = bracket_start
-    elif bracket_start == -1:
-        start_char = '{'
-        end_char = '}'
-        start_pos = brace_start
-    else:
-        if brace_start < bracket_start:
-            start_char = '{'
-            end_char = '}'
-            start_pos = brace_start
-        else:
-            start_char = '['
-            end_char = ']'
-            start_pos = bracket_start
-    
-    # Find matching closing brace/bracket
-    depth = 0
-    in_string = False
-    escape_next = False
-    
-    for i in range(start_pos, len(text)):
-        char = text[i]
-        
-        if escape_next:
-            escape_next = False
-            continue
-        
-        if char == '\\':
-            escape_next = True
-            continue
-        
-        if char == '"':
-            in_string = not in_string
-            continue
-        
-        if in_string:
-            continue
-        
-        if char == start_char:
-            depth += 1
-        elif char == end_char:
-            depth -= 1
-            if depth == 0:
-                # Found complete JSON
-                return text[start_pos:i+1]
-    
+    logger.debug("No valid JSON object found in text")
     return None
 
 
-def normalize_guardrail_response(data: dict) -> dict:
+def normalize_guardrail_response(data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Normalize common variations in guardrail classification responses.
-    
-    This function handles various ways LLMs might express the same concept:
-    - "classification": "allow" → "allowed": true
-    - "action": "block" → "allowed": false
-    - Missing "reason" field → adds default
+    Normalize guardrail response data to expected schema.
     
     Args:
-        data: Raw dictionary from LLM
+        data: Raw JSON data from LLM
         
     Returns:
-        Normalized dictionary with standard keys (allowed, reason)
-        
-    Examples:
-        >>> normalize_guardrail_response({"classification": "allow"})
-        {"allowed": true, "reason": "OK"}
-        
-        >>> normalize_guardrail_response({"action": "block", "reason": "malicious"})
-        {"allowed": false, "reason": "malicious"}
+        Normalized data matching expected schema
     """
     normalized = {}
     
-    # Determine if request is allowed
-    allowed = None
+    # Normalize 'allowed' field
+    if 'allowed' in data:
+        normalized['allowed'] = bool(data['allowed'])
+    elif 'classification' in data:
+        # Handle variations like "allow", "block", "deny"
+        classification = str(data['classification']).lower()
+        if classification in ['allow', 'allowed', 'permit', 'ok', 'pass']:
+            normalized['allowed'] = True
+        elif classification in ['block', 'deny', 'reject', 'fail', 'no']:
+            normalized['allowed'] = False
+        else:
+            # Default to False for unknown classifications
+            normalized['allowed'] = False
+            logger.warning(f"Unknown classification value: {data['classification']}")
+    else:
+        # Default to False if no allowed/classification field
+        normalized['allowed'] = False
+        logger.warning("No 'allowed' or 'classification' field found")
     
-    # Check various keys that might indicate permission
-    if "allowed" in data:
-        allowed = bool(data["allowed"])
-    elif "classification" in data:
-        classification = str(data["classification"]).lower()
-        allowed = classification in ("allow", "allowed", "ok", "safe", "pass")
-    elif "action" in data:
-        action = str(data["action"]).lower()
-        allowed = action in ("allow", "pass", "ok")
-    elif "is_allowed" in data:
-        allowed = bool(data["is_allowed"])
-    elif "status" in data:
-        status = str(data["status"]).lower()
-        allowed = status in ("allowed", "ok", "safe", "pass")
+    # Normalize 'reason' field
+    if 'reason' in data:
+        normalized['reason'] = str(data['reason'])
+    elif 'explanation' in data:
+        normalized['reason'] = str(data['explanation'])
+    elif 'justification' in data:
+        normalized['reason'] = str(data['justification'])
+    else:
+        # Provide default reason
+        normalized['reason'] = "No reason provided"
     
-    # Default to not allowed if we can't determine
-    if allowed is None:
-        logger.warning(f"Could not determine allowed status from guardrail response: {data}")
-        allowed = False
+    # Copy any other fields that might be useful
+    for key, value in data.items():
+        if key not in ['allowed', 'classification', 'reason', 'explanation', 'justification']:
+            normalized[key] = value
     
-    normalized["allowed"] = allowed
-    
-    # Extract reason
-    reason = data.get("reason") or data.get("message") or data.get("explanation")
-    
-    if not reason:
-        reason = "OK" if allowed else "Classification failed"
-    
-    normalized["reason"] = str(reason)
-    
+    logger.debug(f"Normalized guardrail response: {normalized}")
     return normalized
 
 
-def parse_json_tolerant(text: str, normalize_guardrail: bool = False) -> Optional[dict]:
+def tolerant_json_parse(text: str, schema_type: str = "guardrail") -> Optional[Dict[str, Any]]:
     """
-    Parse JSON with tolerance for malformed input.
-    
-    This function:
-    1. Tries standard JSON parsing first
-    2. Falls back to extracting JSON from text
-    3. Optionally normalizes guardrail responses
+    Parse JSON text with tolerance for common variations.
     
     Args:
-        text: Text that should contain JSON
-        normalize_guardrail: Whether to normalize guardrail classification responses
+        text: JSON text to parse
+        schema_type: Type of schema to normalize for
         
     Returns:
-        Parsed dictionary, or None if parsing fails
-        
-    Raises:
-        ValueError: If JSON cannot be parsed even with tolerant methods
+        Parsed and normalized JSON data, or None if parsing fails
     """
     if not text or not isinstance(text, str):
-        raise ValueError("Input must be non-empty string")
+        return None
     
-    # Try standard JSON parsing first
+    # First try standard JSON parsing
     try:
-        data = json.loads(text)
-        if normalize_guardrail and isinstance(data, dict):
-            data = normalize_guardrail_response(data)
-        return data
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            logger.debug("Standard JSON parsing succeeded")
+            return parsed
     except json.JSONDecodeError:
-        pass
+        logger.debug("Standard JSON parsing failed, trying tolerant parsing")
     
-    # Try to extract JSON from text
-    extracted = extract_json_from_text(text)
+    # Try to extract first JSON object
+    extracted = extract_first_json(text)
     if not extracted:
-        logger.warning(f"Could not extract JSON from text: {text[:200]}")
-        raise ValueError("No valid JSON found in text")
+        logger.debug("No JSON object could be extracted from text")
+        return None
     
-    # Parse extracted JSON
-    try:
-        data = json.loads(extracted)
-        if normalize_guardrail and isinstance(data, dict):
-            data = normalize_guardrail_response(data)
-        return data
-    except json.JSONDecodeError as e:
-        logger.warning(f"Extracted JSON is still invalid: {extracted[:200]}")
-        raise ValueError(f"Invalid JSON after extraction: {str(e)}")
+    # Normalize based on schema type
+    if schema_type == "guardrail":
+        return normalize_guardrail_response(extracted)
+    else:
+        # For other schema types, return as-is for now
+        return extracted
 
 
-def redact_for_logging(text: str, max_length: int = 512) -> str:
+def validate_json_schema(data: Dict[str, Any], required_fields: list) -> Tuple[bool, str]:
     """
-    Redact sensitive information from text for logging.
+    Validate that JSON data contains required fields.
+    
+    Args:
+        data: JSON data to validate
+        required_fields: List of required field names
+        
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    if not isinstance(data, dict):
+        return False, "Data is not a dictionary"
+    
+    missing_fields = []
+    for field in required_fields:
+        if field not in data:
+            missing_fields.append(field)
+    
+    if missing_fields:
+        return False, f"Missing required fields: {', '.join(missing_fields)}"
+    
+    return True, ""
+
+
+def redact_sensitive_content(text: str, max_length: int = 512) -> str:
+    """
+    Redact sensitive content from text for logging.
     
     Args:
         text: Text to redact
-        max_length: Maximum length to return
+        max_length: Maximum length of returned text
         
     Returns:
-        Redacted text truncated to max_length
+        Redacted text safe for logging
     """
     if not text:
         return ""
     
-    # Truncate
+    # Truncate if too long
     if len(text) > max_length:
         text = text[:max_length] + "..."
     
-    # Remove potential sensitive patterns
-    # Email addresses
-    text = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL]', text)
+    # Simple redaction patterns (can be extended)
+    redaction_patterns = [
+        (r'password["\']?\s*:\s*["\'][^"\']+["\']', 'password": "[REDACTED]"'),
+        (r'token["\']?\s*:\s*["\'][^"\']+["\']', 'token": "[REDACTED]"'),
+        (r'key["\']?\s*:\s*["\'][^"\']+["\']', 'key": "[REDACTED]"'),
+    ]
     
-    # Phone numbers (simple patterns)
-    text = re.sub(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b', '[PHONE]', text)
+    redacted = text
+    for pattern, replacement in redaction_patterns:
+        redacted = re.sub(pattern, replacement, redacted, flags=re.IGNORECASE)
     
-    # Credit card-like patterns (4 groups of 4 digits)
-    text = re.sub(r'\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b', '[CARD]', text)
+    return redacted
+
+
+def log_json_parse_error(text: str, error: Exception, context: str = ""):
+    """
+    Log JSON parsing errors with redacted content.
     
-    return text
+    Args:
+        text: Original text that failed to parse
+        error: Exception that occurred
+        context: Additional context for logging
+    """
+    redacted_text = redact_sensitive_content(text)
+    logger.error(f"JSON parsing failed {context}: {error}")
+    logger.debug(f"Redacted content: {redacted_text}")
+
+
+# Health check utilities
+def validate_guardrail_schema() -> Tuple[bool, str]:
+    """
+    Validate that guardrail schema is correct.
+    
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    try:
+        # Test with sample data
+        test_data = {
+            "allowed": True,
+            "reason": "Test reason"
+        }
+        
+        # Validate required fields
+        is_valid, error_msg = validate_json_schema(test_data, ["allowed", "reason"])
+        if not is_valid:
+            return False, f"Schema validation failed: {error_msg}"
+        
+        # Test normalization
+        normalized = normalize_guardrail_response(test_data)
+        if not isinstance(normalized.get("allowed"), bool):
+            return False, "Normalized 'allowed' field is not boolean"
+        
+        if not isinstance(normalized.get("reason"), str):
+            return False, "Normalized 'reason' field is not string"
+        
+        logger.info("Guardrail schema validation passed")
+        return True, "Schema validation passed"
+        
+    except Exception as e:
+        error_msg = f"Schema validation error: {e}"
+        logger.error(error_msg)
+        return False, error_msg
 
 
 if __name__ == "__main__":
-    # Simple tests
-    import doctest
-    doctest.testmod()
-
+    # Test the utilities
+    test_text = '{"classification": "allow", "explanation": "This is a test"}'
+    result = tolerant_json_parse(test_text, "guardrail")
+    print(f"Test result: {result}")
+    
+    # Test schema validation
+    is_valid, msg = validate_guardrail_schema()
+    print(f"Schema validation: {is_valid}, {msg}")

@@ -74,29 +74,29 @@ llm_rate_limited_total = Counter(
     "Total number of LLM rate limit hits"
 )
 
-# Guardrail Robustness Metrics
+# New metrics for robust guardrail system
 guardrail_validation_errors_total = Counter(
     "guardrail_validation_errors_total",
     "Total number of guardrail validation errors",
-    ["error_type"]
+    ["error_type", "schema_type"]
 )
 
 guardrail_dev_bypass_total = Counter(
     "guardrail_dev_bypass_total",
-    "Total number of guardrail dev mode bypasses",
-    ["reason"]
+    "Total number of guardrail dev bypass events",
+    ["bypass_reason"]
 )
 
 llm_json_parse_failures_total = Counter(
     "llm_json_parse_failures_total",
-    "Total number of LLM JSON parse failures",
-    ["parser_type"]
+    "Total number of LLM JSON parsing failures",
+    ["parser_type", "schema_type"]
 )
 
 llm_retry_attempts_total = Counter(
     "llm_retry_attempts_total",
     "Total number of LLM retry attempts",
-    ["retry_number"]
+    ["attempt_number", "failure_reason"]
 )
 
 def start_metrics_server():
