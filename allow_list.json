@@ -31,7 +31,7 @@
   "properties": {
     "Student": ["fullName", "name"],
     "Staff": ["fullName", "role"],
-    "Goal": ["title", "status"],
+    "Goal": ["title", "name", "goalTitle", "status"],
     "Accommodation": ["name"],
     "EvaluationReport": ["title", "dateTime"],
     "ConcernArea": ["name"]
