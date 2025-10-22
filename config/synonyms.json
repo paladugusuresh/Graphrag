@@ -1,0 +1,33 @@
+{
+  "labels": {
+    "Student": ["student","pupil","learner","kid"],
+    "Staff": ["teacher","therapist","counselor","case manager","slp"],
+    "Goal": ["goal","objective","target","iep goal"],
+    "Plan": ["plan","iep","504","intervention plan","transition plan"],
+    "BehaviorInterventionPlan": ["bip","behavior intervention plan"],
+    "Accommodation": ["accommodation","modification","support"],
+    "AssistiveTechnology": ["assistive tech","at","device"],
+    "EvaluationReport": ["evaluation","assessment report","psychoeducational"],
+    "ConcernArea": ["area of need","focus area","domain"],
+    "ProgressMonitoring": ["progress check","progress probe","monitoring"]
+  },
+  "relationships": {
+    "FOR_STUDENT": ["for student","of student","about student"],
+    "HAS_PLAN": ["has plan","assigned plan","iep has"],
+    "HAS_GOAL": ["has goal","goals","targets"],
+    "HAS_PROGRESS": ["has progress","progress monitoring","progress"],
+    "USES_ACCOMMODATION": ["uses accommodation","accommodations"],
+    "PROVIDED_BY": ["provided by","delivered by","by staff"],
+    "HAS_CONCERN": ["has concern","concern area"],
+    "HAS_CASE_MANAGER": ["case manager","assigned case manager"],
+    "PARTICIPANT": ["participant","attendee","attended"],
+    "PARTICIPATED_IN": ["participated in","attended meeting"],
+    "HAS_IEP_DOCUMENT": ["iep document","document link"]
+  },
+  "properties": {
+    "fullName": ["name","student name"],
+    "dateTime": ["date","datetime","meeting date"],
+    "status": ["status","state"],
+    "title": ["title","goal title","name"]
+  }
+}
