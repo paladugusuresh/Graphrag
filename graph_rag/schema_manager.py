@@ -267,7 +267,7 @@ def get_schema_fingerprint() -> Optional[str]:
     try:
         from graph_rag.schema_catalog import generate_schema_allow_list
         # Generate schema without writing to disk
-        allow_list = generate_schema_allow_list(allow_list_path=None, write_to_disk=False)
+        allow_list = generate_schema_allow_list(output_path=None, write_to_disk=False)
         return _compute_fingerprint(allow_list)
     except Exception as e:
         logger.error(f"Failed to compute schema fingerprint: {e}")
