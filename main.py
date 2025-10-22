@@ -14,6 +14,7 @@ from graph_rag.config_manager import get_config_value, ensure_production_flags
 from graph_rag.schema_manager import ensure_schema_loaded, ensure_chunk_vector_index
 from graph_rag.schema_embeddings import upsert_schema_embeddings
 from graph_rag.flags import get_all_flags, SCHEMA_BOOTSTRAP_ENABLED
+from graph_rag.admin_api import admin_router
 import uuid
 
 logger = get_logger(__name__)
@@ -92,6 +93,9 @@ async def lifespan(app: FastAPI):
     # Cleanup code can go here if needed
 
 app = FastAPI(title="GraphRAG", lifespan=lifespan)
+
+# Register admin router for administrative endpoints
+app.include_router(admin_router)
 
 class ChatRequest(BaseModel):
     conversation_id: str | None = None
@@ -180,58 +184,16 @@ def get_history(conversation_id: str):
         raise HTTPException(404, "Conversation not found")
     return history
 
-@app.post("/admin/schema/refresh")
-def admin_schema_refresh(x_admin_token: str | None = Header(None)):
-    """
-    Admin endpoint to force refresh schema extraction and embedding upsert.
-    
-    This endpoint allows administrators to manually trigger schema refresh when
-    the database schema has changed. It calls ensure_schema_loaded(force=True)
-    and upsert_schema_embeddings() to update the allow-list and vector index.
-    
-    Security: Protected by ADMIN_REFRESH_TOKEN header if configured.
-    Usage: POST /admin/schema/refresh with header x-admin-token: <token>
-    """
-    admin_token = os.getenv("ADMIN_REFRESH_TOKEN")
-    if admin_token:
-        if not x_admin_token or x_admin_token != admin_token:
-            raise HTTPException(401, "Unauthorized")
-    
-    try:
-        # Force schema refresh (ignores fingerprint check)
-        allow_list = ensure_schema_loaded(force=True)
-        logger.info("Schema extraction completed (forced refresh)")
-        
-        # Force embedding upsert
-        result = upsert_schema_embeddings()
-        logger.info("Schema embeddings upsert completed")
-        
-        # Record successful admin action
-        audit_store.record({
-            "event": "admin_schema_refresh",
-            "status": "success",
-            "allow_list_keys": len(allow_list.get('node_labels', [])) + len(allow_list.get('relationship_types', [])),
-            "timestamp": str(uuid.uuid4())
-        })
-        
-        return {
-            "status": "ok",
-            "result": result,
-            "message": "Schema and embeddings refreshed successfully"
-        }
-        
-    except Exception as e:
-        logger.error(f"Admin schema refresh failed: {e}")
-        
-        # Record failed admin action
-        audit_store.record({
-            "event": "admin_schema_refresh",
-            "status": "failed",
-            "error": str(e),
-            "timestamp": str(uuid.uuid4())
-        })
-        
-        raise HTTPException(500, "Schema refresh failed")
+# Note: Admin routes have been moved to graph_rag/admin_api.py
+# The /admin/schema/refresh endpoint is now handled by admin_router
+#
+# @app.post("/admin/schema/refresh")
+# def admin_schema_refresh(x_admin_token: str | None = Header(None)):
+#     """
+#     DEPRECATED: This route has been moved to admin_api.py
+#     Use admin_router for all administrative endpoints.
+#     """
+#     pass
 
 @app.get("/health")
 def health_check():
