@@ -78,13 +78,24 @@ class EmbeddingProvider:
             logger.info("Running with mock embeddings (DEV_MODE or SKIP_INTEGRATION)")
 
     def get_embeddings(self, texts: list[str]) -> list[list[float]]:
+        """
+        Get embeddings for a list of texts with standardized output normalization.
+        
+        Args:
+            texts: List of input strings to embed
+            
+        Returns:
+            List[List[float]]: One embedding vector per input string, normalized to consistent shape and type
+        """
         if not texts:
             return []
         
         # Use mock embeddings if configured
         if self._use_mock or not self.client:
-            # simple deterministic mock embeddings
-            return [[float(len(t))] * 8 for t in texts]
+            # Simple deterministic mock embeddings - 8 dimensions
+            mock_embeddings = [[float(len(t))] * 8 for t in texts]
+            logger.debug(f"Mock embeddings: {len(texts)} inputs → {len(mock_embeddings)} vectors, dimension=8")
+            return mock_embeddings
         
         try:
             llm_calls_total.inc()
@@ -95,23 +106,156 @@ class EmbeddingProvider:
                 task_type="retrieval_document"
             )
             
-            # Extract embeddings from result
-            if hasattr(result, 'embedding'):
-                # Single text case
-                return [result.embedding]
-            elif hasattr(result, 'embeddings'):
-                # Multiple texts case
-                return [emb.values for emb in result.embeddings]
-            else:
-                logger.warning(f"Unexpected Gemini embedding result format: {result}")
-                return [[float(len(t))] * 8 for t in texts]
+            # Extract embeddings from result using defensive normalization
+            raw_embeddings = self._extract_embeddings_from_response(result, texts)
+            
+            # Normalize and validate the embeddings
+            normalized_embeddings = self._normalize_embeddings(raw_embeddings, texts)
+            
+            return normalized_embeddings
                 
         except Exception as e:
             logger.error(f"Embedding error: {e}")
-            # Return mock embeddings on error instead of empty lists
-            if _should_use_mock():
-                return [[float(len(t))] * 8 for t in texts]
-            return [[float(len(t))] * 8 for t in texts]  # Graceful fallback
+            # Return mock embeddings on error as graceful fallback
+            fallback_embeddings = [[float(len(t))] * 8 for t in texts]
+            logger.warning(f"Using fallback embeddings: {len(texts)} inputs → {len(fallback_embeddings)} vectors")
+            return fallback_embeddings
+    
+    def _extract_embeddings_from_response(self, result, texts: list[str]) -> list:
+        """
+        Extract embeddings from various provider response formats.
+        
+        Handles known return shapes:
+        - {"embedding": [[...]]} - batch format
+        - {"embedding": [...]} - single vector format
+        - {"data": [{"embedding": [...]}, ...]} - OpenAI-style format
+        - {"embeddings": [obj, ...]} - Gemini format with .values attribute
+        - {"embedding": [[[...]]]} - over-nested format
+        """
+        # Handle Gemini API response objects
+        if hasattr(result, 'embedding'):
+            # Single text case - wrap in list
+            embedding = result.embedding
+            if isinstance(embedding, (list, tuple)):
+                return [embedding]
+            else:
+                logger.warning(f"Unexpected embedding type: {type(embedding)}")
+                return []
+        
+        elif hasattr(result, 'embeddings'):
+            # Multiple texts case - extract values from each embedding object
+            embeddings = []
+            for emb in result.embeddings:
+                if hasattr(emb, 'values'):
+                    embeddings.append(emb.values)
+                elif isinstance(emb, (list, tuple)):
+                    embeddings.append(emb)
+                else:
+                    logger.warning(f"Unexpected embedding object type: {type(emb)}")
+            return embeddings
+        
+        # Handle dict-style responses
+        elif isinstance(result, dict):
+            # OpenAI-style format: {"data": [{"embedding": [...]}, ...]}
+            if "data" in result:
+                embeddings = []
+                for item in result["data"]:
+                    if isinstance(item, dict) and "embedding" in item:
+                        embeddings.append(item["embedding"])
+                return embeddings
+            
+            # Direct embedding key: {"embedding": ...}
+            elif "embedding" in result:
+                embedding = result["embedding"]
+                
+                # Check if it's a single vector (list of numbers)
+                if isinstance(embedding, (list, tuple)) and len(embedding) > 0:
+                    # Check if first element is a number or a list
+                    if isinstance(embedding[0], (int, float)):
+                        # Single vector - wrap it
+                        return [embedding]
+                    elif isinstance(embedding[0], (list, tuple)):
+                        # Check for over-nesting: [[[...]]]
+                        if len(embedding) == 1 and isinstance(embedding[0], (list, tuple)) and len(embedding[0]) > 0:
+                            if isinstance(embedding[0][0], (list, tuple)):
+                                # Over-nested: [[[...]]] - unwrap one level
+                                logger.debug("Detected over-nested embedding format, unwrapping one level")
+                                return embedding[0]
+                        # Check if it's a batch of vectors (first element is a list of numbers)
+                        if isinstance(embedding[0][0], (int, float)):
+                            # Batch of vectors - return as-is
+                            return embedding
+                return []
+            
+            # Check for "embeddings" key in dict
+            elif "embeddings" in result:
+                return result["embeddings"]
+        
+        # Unknown format
+        logger.warning(f"Unexpected embedding result format: {type(result)}")
+        return []
+    
+    def _normalize_embeddings(self, raw_embeddings: list, texts: list[str]) -> list[list[float]]:
+        """
+        Normalize embeddings to ensure consistent shape, type, and batch size.
+        
+        Args:
+            raw_embeddings: Raw embedding vectors from provider
+            texts: Original input texts
+            
+        Returns:
+            Normalized List[List[float]] with guaranteed 1:1 mapping to inputs
+        """
+        if not raw_embeddings:
+            logger.warning(f"Empty or malformed embeddings response for {len(texts)} inputs")
+            return []
+        
+        # Normalize each vector to List[float]
+        normalized = []
+        for i, vector in enumerate(raw_embeddings):
+            if vector is None or not isinstance(vector, (list, tuple)):
+                logger.warning(f"Skipping invalid embedding at index {i}: {type(vector)}")
+                continue
+            
+            # Convert all elements to float, skipping non-numeric values
+            normalized_vector = []
+            for x in vector:
+                if isinstance(x, (int, float)):
+                    normalized_vector.append(float(x))
+                else:
+                    logger.debug(f"Skipping non-numeric value in embedding: {type(x)}")
+            
+            if normalized_vector:
+                normalized.append(normalized_vector)
+        
+        # Validate shape consistency
+        if len(normalized) != len(texts):
+            logger.warning(
+                f"Embedding count mismatch: {len(texts)} inputs → {len(normalized)} vectors. "
+                f"Expected 1:1 mapping."
+            )
+            
+            # Truncate to shortest length to maintain alignment
+            min_length = min(len(normalized), len(texts))
+            if min_length < len(normalized):
+                logger.warning(f"Truncating embeddings from {len(normalized)} to {min_length}")
+                normalized = normalized[:min_length]
+        
+        # Validate dimension consistency (all vectors should have same length)
+        if normalized:
+            dimensions = [len(v) for v in normalized]
+            unique_dims = set(dimensions)
+            
+            if len(unique_dims) > 1:
+                logger.warning(f"Inconsistent embedding dimensions detected: {unique_dims}")
+            
+            # Log successful normalization
+            dimension = dimensions[0] if dimensions else 0
+            logger.debug(
+                f"Embedding batch: {len(texts)} inputs → {len(normalized)} vectors, dimension={dimension}"
+            )
+        
+        return normalized
 
 def get_embedding_provider():
     """Get or create singleton embedding provider"""
