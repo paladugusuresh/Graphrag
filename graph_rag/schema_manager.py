@@ -339,7 +339,7 @@ def ensure_schema_loaded(force: bool = False) -> Dict[str, Any]:
     try:
         logger.info("Generating schema allow list from database")
         from graph_rag.schema_catalog import generate_schema_allow_list
-        base_allow_list = generate_schema_allow_list(allow_list_path=None, write_to_disk=False)
+        base_allow_list = generate_schema_allow_list(output_path=allow_list_path, write_to_disk=False)
         
         # Load and merge overrides if present
         overrides = load_allow_list_overrides("config/allow_list_overrides.json")

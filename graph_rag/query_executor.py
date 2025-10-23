@@ -85,7 +85,14 @@ def safe_execute(cypher: str, params: Dict[str, Any] = None, timeout: int = None
             # Get configuration values
             max_results = get_config_value('guardrails.max_results', 1000)
             default_timeout = get_config_value('guardrails.query_timeout', 30)
+            default_limit = get_config_value("query.default_limit", 10)
             execution_timeout = timeout or default_timeout
+            
+            # Normalize params to include limit if missing
+            normalized_params = params.copy() if params else {}
+            if "limit" not in normalized_params or not normalized_params["limit"]:
+                normalized_params["limit"] = default_limit
+                logger.debug(f"Auto-injected limit parameter: {default_limit}")
             
             # Apply LIMIT enforcement if not present
             # Heuristic: Check if query already contains LIMIT clause (case-insensitive)
@@ -107,7 +114,7 @@ def safe_execute(cypher: str, params: Dict[str, Any] = None, timeout: int = None
             
             results = neo4j_client.execute_read_query(
                 query=limited_cypher,
-                params=params or {},
+                params=normalized_params,
                 timeout=execution_timeout,
                 query_name="user_query"
             )

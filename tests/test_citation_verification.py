@@ -19,12 +19,12 @@ class ExtractedGraph(BaseModel):
     relationships: list[dict] = []
 
 @patch("builtins.open", new_callable=mock_open)
-@patch.dict(os.environ, {"NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password", "OPENAI_API_KEY": "mock_openai_key"}, clear=True)
+@patch.dict(os.environ, {"NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password", "GEMINI_API_KEY": "mock_gemini_key"}, clear=True)
 @patch("graph_rag.llm_client._get_redis_client")
 @patch("graph_rag.cypher_generator.CypherGenerator")
 @patch("graph_rag.embeddings.get_embedding_provider")
 @patch("graph_rag.planner.call_llm_structured")
-@patch("graph_rag.rag.ChatOpenAI")
+@patch("graph_rag.rag.call_llm_raw")
 @patch("graph_rag.rag.tracer")
 @patch("graph_rag.rag.get_current_span")
 @patch("graph_rag.rag.audit_store.record") # Patch audit_store.record
@@ -49,13 +49,13 @@ class TestCitationVerification(unittest.TestCase):
         if hasattr(REGISTRY, '_names_to_collectors'):
             REGISTRY._names_to_collectors.clear()
 
-    def test_unknown_citation_flags_verification_failure_and_audits(self, mock_neo4j_client_class, mock_retriever_neo4j_client_class, mock_rag_retriever_class, mock_token_text_splitter_class, mock_document_class, mock_glob, mock_ingest_logger, mock_rag_logger, mock_retriever_logger, mock_planner_logger, mock_audit_store_record, mock_get_current_span, mock_rag_tracer, mock_chat_openai_class, mock_call_llm_structured_planner, mock_get_embedding_provider_class, mock_cypher_generator_class, mock_get_redis_client, mock_open):
+    def test_unknown_citation_flags_verification_failure_and_audits(self, mock_neo4j_client_class, mock_retriever_neo4j_client_class, mock_rag_retriever_class, mock_token_text_splitter_class, mock_document_class, mock_glob, mock_ingest_logger, mock_rag_logger, mock_retriever_logger, mock_planner_logger, mock_audit_store_record, mock_get_current_span, mock_rag_tracer, mock_call_llm_raw, mock_call_llm_structured_planner, mock_get_embedding_provider_class, mock_cypher_generator_class, mock_get_redis_client, mock_open):
         # Configure mock_open side_effect
         mock_open.side_effect = [
             mock_open(read_data=json.dumps({
                 "schema": { "allow_list_path": "allow_list.json" },
                 "guardrails": { "neo4j_timeout": 10, "max_traversal_depth": 2 },
-                "llm": { "model": "gpt-4o", "max_tokens": 512, "rate_limit_per_minute": 60, "redis_url": "redis://localhost:6379/0" },
+                "llm": { "model": "gemini-2.0-flash-exp", "max_tokens": 512, "rate_limit_per_minute": 60, "redis_url": "redis://localhost:6379/0" },
                 "retriever": {"max_chunks": 5}
             })).return_value, # For config.yaml
             mock_open(read_data=json.dumps({
@@ -88,10 +88,7 @@ class TestCitationVerification(unittest.TestCase):
             "relationship_types": ["PART_OF", "HAS_CHUNK", "MENTIONS", "FOUNDED", "HAS_CHUNK"],
             "properties": {}
         }
-        mock_cypher_generator_instance.CYPHER_TEMPLATES = {
-            "general_rag_query": {"cypher": "MATCH (n) RETURN n LIMIT 1"},
-            "company_founder_query": {"cypher": "MATCH (n:Person) RETURN n LIMIT 1"},
-        }
+        # Note: CYPHER_TEMPLATES removed in Task 21 - now using LLM-driven approach
 
         mock_embedding_provider_instance = MagicMock()
         mock_get_embedding_provider_class.return_value = mock_embedding_provider_instance
@@ -116,10 +113,8 @@ class TestCitationVerification(unittest.TestCase):
         ]
         mock_retriever_neo4j_client_instance.verify_connectivity.return_value = None
 
-        mock_chat_openai_instance = MagicMock()
-        mock_chat_openai_class.return_value = mock_chat_openai_instance
-        # Simulate an answer with an unknown citation "chunk_unknown"
-        mock_chat_openai_instance.generate.return_value = MagicMock(generations=[[MagicMock(text="Answer with [chunk1] and [chunk_unknown]")]])
+        # Mock call_llm_raw to return an answer with an unknown citation "chunk_unknown"
+        mock_call_llm_raw.return_value = "Answer with [chunk1] and [chunk_unknown]"
 
         mock_call_llm_structured_planner.return_value = MagicMock(names=["Microsoft"])
 

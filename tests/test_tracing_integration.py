@@ -20,12 +20,12 @@ class ExtractedGraph(BaseModel):
 
 # Global patches for module-level imports
 @patch("builtins.open", new_callable=mock_open)
-@patch.dict(os.environ, {"NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password", "OPENAI_API_KEY": "mock_openai_key"}, clear=True)
+@patch.dict(os.environ, {"NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password", "GEMINI_API_KEY": "mock_gemini_key"}, clear=True)
 @patch("graph_rag.llm_client._get_redis_client") # Patch the lazy getter function
 @patch("graph_rag.cypher_generator.CypherGenerator") # Patch CypherGenerator in its original module
 @patch("graph_rag.embeddings.get_embedding_provider") # Patch the embedding getter function
 @patch("graph_rag.planner.call_llm_structured") # Patch where it's used in planner
-@patch("graph_rag.rag.ChatOpenAI") # Patch ChatOpenAI in rag
+@patch("graph_rag.rag.call_llm_raw") # Patch call_llm_raw in rag
 @patch("graph_rag.rag.tracer") # Patch tracer in rag
 @patch("graph_rag.rag.get_current_span") # Patch get_current_span in rag
 @patch("graph_rag.planner.logger")
@@ -51,7 +51,7 @@ class TestTracingIntegration(unittest.TestCase):
         if hasattr(REGISTRY, '_names_to_collectors'):
             REGISTRY._names_to_collectors.clear()
 
-    def test_rag_chain_returns_trace_id_and_sources(self, mock_neo4j_client_class, mock_retriever_neo4j_client_class, mock_rag_retriever_class, mock_token_text_splitter_class, mock_document_class, mock_glob, mock_ingest_logger, mock_rag_logger, mock_retriever_logger, mock_planner_logger, mock_get_current_span, mock_rag_tracer, mock_chat_openai_class, mock_call_llm_structured_planner, mock_get_embedding_provider_class, mock_cypher_generator_class, mock_get_redis_client, mock_open):
+    def test_rag_chain_returns_trace_id_and_sources(self, mock_neo4j_client_class, mock_retriever_neo4j_client_class, mock_rag_retriever_class, mock_token_text_splitter_class, mock_document_class, mock_glob, mock_ingest_logger, mock_rag_logger, mock_retriever_logger, mock_planner_logger, mock_get_current_span, mock_rag_tracer, mock_call_llm_raw, mock_call_llm_structured_planner, mock_get_embedding_provider_class, mock_cypher_generator_class, mock_get_redis_client, mock_open):
         # Configure mock_open side_effect
         mock_open.side_effect = [
             mock_open(read_data=json.dumps({
@@ -63,7 +63,7 @@ class TestTracingIntegration(unittest.TestCase):
                     "max_traversal_depth": 2
                 },
                 "llm": {
-                    "model": "gpt-4o",
+                    "model": "gemini-2.0-flash-exp",
                     "max_tokens": 512,
                     "rate_limit_per_minute": 60,
                     "redis_url": "redis://localhost:6379/0"
@@ -121,18 +121,14 @@ class TestTracingIntegration(unittest.TestCase):
             "relationship_types": ["PART_OF", "HAS_CHUNK", "MENTIONS", "FOUNDED", "HAS_CHUNK"],
             "properties": {}
         }
-        mock_cypher_generator_instance.CYPHER_TEMPLATES = {
-            "general_rag_query": {"cypher": "MATCH (n) RETURN n LIMIT 1"},
-            "company_founder_query": {"cypher": "MATCH (n:Person) RETURN n LIMIT 1"},
-        }
+        # Note: CYPHER_TEMPLATES removed in Task 21 - now using LLM-driven approach
 
         mock_embedding_provider_instance = MagicMock()
         mock_get_embedding_provider_class.return_value = mock_embedding_provider_instance
         mock_embedding_provider_instance.get_embeddings.return_value = [[0.1]*8] # Mock embedding
 
-        mock_chat_openai_instance = MagicMock()
-        mock_chat_openai_class.return_value = mock_chat_openai_instance
-        mock_chat_openai_instance.generate.return_value = MagicMock(generations=[[MagicMock(text="Answer with [chunk1]")]])
+        # Mock call_llm_raw to return answer text
+        mock_call_llm_raw.return_value = "Answer with [chunk1]"
 
         mock_call_llm_structured_planner.return_value = MagicMock(names=["Microsoft"])
 

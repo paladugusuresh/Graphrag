@@ -45,7 +45,7 @@ class TestSanitizationSimple(unittest.TestCase):
             with self.subTest(input=legitimate_input):
                 self.assertFalse(is_probably_malicious(legitimate_input))
 
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "mock_key"})
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "mock_key"})
     @patch("graph_rag.llm_client.call_llm_raw")
     @patch("graph_rag.llm_client._get_redis_client")
     def test_guardrail_response_model(self, mock_redis_client, mock_call_llm_raw):

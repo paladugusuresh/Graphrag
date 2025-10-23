@@ -87,8 +87,9 @@ class ConfigManager:
                 "metrics_port": 8000
             },
             "llm": {
-                "provider": "openai",
-                "model": "gpt-4o",
+                "provider": "gemini",
+                "model": "gemini-2.0-flash-exp",
+                "embedding_model": "models/text-embedding-004",
                 "max_tokens": 512,
                 "rate_limit_per_minute": 60,
                 "redis_url": "redis://localhost:6379/0"
@@ -96,7 +97,7 @@ class ConfigManager:
             "schema_embeddings": {
                 "index_name": "schema_embeddings",
                 "node_label": "SchemaTerm",
-                "embedding_model": "text-embedding-3-small",
+                "embedding_model": "models/text-embedding-004",
                 "top_k": 5
             }
         }
@@ -111,7 +112,7 @@ class ConfigManager:
         """
         Get config value by dot-separated path.
         Examples:
-            get("llm.model") -> "gpt-4o"
+            get("llm.model") -> "gemini-2.0-flash-exp"
             get("guardrails.neo4j_timeout") -> 10
         """
         config = self.get_config()
@@ -167,9 +168,9 @@ def get_config() -> Dict[str, Any]:
 def get_config_value(key_path: str, default: Any = None) -> Any:
     """
     Get a specific config value by dot-separated path.
-    Examples:
-        get_config_value("llm.model") -> "gpt-4o"
-        get_config_value("missing.key", "default") -> "default"
+        Examples:
+            get_config_value("llm.model") -> "gemini-2.0-flash-exp"
+            get_config_value("missing.key", "default") -> "default"
     """
     global _config_manager
     if _config_manager is None:
@@ -185,10 +186,46 @@ def reload_config():
     _config_manager.reload()
 
 
+def ensure_production_flags():
+    """
+    Ensure production environment flags are set correctly.
+    This function should be called at application startup to verify
+    that production deployments have the correct guardrail settings.
+    """
+    import os
+    
+    # Check if we're in production mode
+    app_mode = os.getenv("APP_MODE", "read_only").lower()
+    dev_mode = os.getenv("DEV_MODE", "").lower() in ("true", "1", "yes")
+    
+    # If not in dev mode, ensure production flags are set
+    if not dev_mode:
+        required_flags = {
+            "LLM_JSON_MODE_ENABLED": "true",
+            "LLM_TOLERANT_JSON_PARSER": "false", 
+            "GUARDRAILS_FAIL_CLOSED_DEV": "true"
+        }
+        
+        missing_flags = []
+        for flag, expected_value in required_flags.items():
+            current_value = os.getenv(flag, "").lower()
+            if current_value != expected_value.lower():
+                missing_flags.append(f"{flag}={expected_value}")
+        
+        if missing_flags:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Production environment missing required flags: {', '.join(missing_flags)}")
+            logger.warning("For production deployments, ensure these environment variables are set:")
+            for flag in missing_flags:
+                logger.warning(f"  export {flag}")
+    
+    return True
+
+
 def subscribe_to_config_reload(callback: Callable[[Dict[str, Any]], None]):
     """Subscribe to config reload notifications"""
     global _config_manager
     if _config_manager is None:
         _config_manager = ConfigManager.get_instance()
     _config_manager.subscribe_to_reload(callback)
-

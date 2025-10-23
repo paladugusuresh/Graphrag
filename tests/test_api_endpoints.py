@@ -75,7 +75,7 @@ class TestAPIEndpoints(unittest.TestCase):
         # Mock config.yaml
         self.mock_open = mock_open(read_data=json.dumps({
             "observability": {"metrics_enabled": False},
-            "llm": {"model": "gpt-4o", "max_tokens": 512, "rate_limit_per_minute": 60, "redis_url": "redis://localhost:6379/0"},
+            "llm": {"model": "gemini-2.0-flash-exp", "max_tokens": 512, "rate_limit_per_minute": 60, "redis_url": "redis://localhost:6379/0"},
             "retriever": {"max_chunks": 5}
         }))
         self.mock_open_patch = patch("builtins.open", new=self.mock_open).start()

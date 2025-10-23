@@ -24,7 +24,7 @@ class TestPlannerLLM(unittest.TestCase):
             REGISTRY._names_to_collectors.clear()
 
     @patch("builtins.open", new_callable=mock_open)
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "mock_openai_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"}, clear=True)
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "mock_gemini_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"}, clear=True)
     @patch("graph_rag.llm_client._get_redis_client")
     @patch("graph_rag.llm_client.call_llm_structured")
     def test_llm_planner_company_founder_query(self, mock_call_llm_structured, mock_get_redis_client, mock_file_open):
@@ -36,11 +36,11 @@ class TestPlannerLLM(unittest.TestCase):
             mock_open(read_data=json.dumps({
                 "schema": {"allow_list_path": "allow_list.json"},
                 "llm": {
-                    "model": "gpt-4o",
+                    "model": "gemini-2.0-flash-exp",
                     "max_tokens": 512,
                     "rate_limit_per_minute": 60,
                     "redis_url": "redis://localhost:6379/0",
-                    "planner_model": "gpt-4o",
+                    "planner_model": "gemini-2.0-flash-exp",
                     "planner_max_tokens": 256
                 }
             })).return_value,
@@ -80,7 +80,7 @@ class TestPlannerLLM(unittest.TestCase):
         mock_call_llm_structured.assert_called_once()
         call_args = mock_call_llm_structured.call_args
         self.assertEqual(call_args[1]["schema_model"], PlannerOutput)
-        self.assertEqual(call_args[1]["model"], "gpt-4o")
+        self.assertEqual(call_args[1]["model"], "gemini-2.0-flash-exp")
         self.assertEqual(call_args[1]["max_tokens"], 256)
         
         # Verify prompt contains template information
@@ -91,7 +91,7 @@ class TestPlannerLLM(unittest.TestCase):
         self.assertIn(question, prompt)
 
     @patch("builtins.open", new_callable=mock_open)
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "mock_openai_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"}, clear=True)
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "mock_gemini_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"}, clear=True)
     @patch("graph_rag.llm_client._get_redis_client")
     @patch("graph_rag.llm_client.call_llm_structured")
     def test_llm_planner_general_query(self, mock_call_llm_structured, mock_get_redis_client, mock_file_open):
@@ -103,11 +103,11 @@ class TestPlannerLLM(unittest.TestCase):
             mock_open(read_data=json.dumps({
                 "schema": {"allow_list_path": "allow_list.json"},
                 "llm": {
-                    "model": "gpt-4o",
+                    "model": "gemini-2.0-flash-exp",
                     "max_tokens": 512,
                     "rate_limit_per_minute": 60,
                     "redis_url": "redis://localhost:6379/0",
-                    "planner_model": "gpt-4o",
+                    "planner_model": "gemini-2.0-flash-exp",
                     "planner_max_tokens": 256
                 }
             })).return_value,
@@ -144,7 +144,7 @@ class TestPlannerLLM(unittest.TestCase):
         self.assertEqual(result.question, question)
 
     @patch("builtins.open", new_callable=mock_open)
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "mock_openai_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"}, clear=True)
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "mock_gemini_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"}, clear=True)
     @patch("graph_rag.llm_client._get_redis_client")
     @patch("graph_rag.llm_client.call_llm_structured")
     def test_llm_planner_invalid_intent_fallback(self, mock_call_llm_structured, mock_get_redis_client, mock_file_open):
@@ -156,11 +156,11 @@ class TestPlannerLLM(unittest.TestCase):
             mock_open(read_data=json.dumps({
                 "schema": {"allow_list_path": "allow_list.json"},
                 "llm": {
-                    "model": "gpt-4o",
+                    "model": "gemini-2.0-flash-exp",
                     "max_tokens": 512,
                     "rate_limit_per_minute": 60,
                     "redis_url": "redis://localhost:6379/0",
-                    "planner_model": "gpt-4o",
+                    "planner_model": "gemini-2.0-flash-exp",
                     "planner_max_tokens": 256
                 }
             })).return_value,
@@ -196,7 +196,7 @@ class TestPlannerLLM(unittest.TestCase):
         self.assertEqual(result.question, question)
 
     @patch("builtins.open", new_callable=mock_open)
-    @patch.dict(os.environ, {"OPENAI_API_KEY": "mock_openai_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"}, clear=True)
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "mock_gemini_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"}, clear=True)
     @patch("graph_rag.llm_client._get_redis_client")
     @patch("graph_rag.llm_client.call_llm_structured")
     def test_llm_planner_fallback_on_error(self, mock_call_llm_structured, mock_get_redis_client, mock_file_open):
@@ -208,11 +208,11 @@ class TestPlannerLLM(unittest.TestCase):
             mock_open(read_data=json.dumps({
                 "schema": {"allow_list_path": "allow_list.json"},
                 "llm": {
-                    "model": "gpt-4o",
+                    "model": "gemini-2.0-flash-exp",
                     "max_tokens": 512,
                     "rate_limit_per_minute": 60,
                     "redis_url": "redis://localhost:6379/0",
-                    "planner_model": "gpt-4o",
+                    "planner_model": "gemini-2.0-flash-exp",
                     "planner_max_tokens": 256
                 }
             })).return_value,

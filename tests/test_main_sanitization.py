@@ -6,11 +6,10 @@ import sys
 from fastapi.testclient import TestClient
 from prometheus_client import REGISTRY
 
-@patch.dict(os.environ, {"OPENAI_API_KEY": "mock_openai_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"}, clear=True)
+@patch.dict(os.environ, {"GEMINI_API_KEY": "mock_gemini_key", "NEO4J_URI": "bolt://localhost:7687", "NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": "password"}, clear=True)
 @patch("graph_rag.llm_client._get_redis_client")
 @patch("graph_rag.neo4j_client.GraphDatabase")
 @patch("graph_rag.embeddings.get_embedding_provider")
-@patch("langchain_openai.ChatOpenAI")
 class TestMainSanitization(unittest.TestCase):
 
     def setUp(self):
@@ -29,7 +28,7 @@ class TestMainSanitization(unittest.TestCase):
         # Mock config.yaml
         self.mock_open = mock_open(read_data=json.dumps({
             "observability": {"metrics_enabled": False},
-            "llm": {"model": "gpt-4o", "max_tokens": 512, "rate_limit_per_minute": 60, "redis_url": "redis://localhost:6379/0"},
+            "llm": {"model": "gemini-2.0-flash-exp", "max_tokens": 512, "rate_limit_per_minute": 60, "redis_url": "redis://localhost:6379/0"},
             "retriever": {"max_chunks": 5}
         }))
 
@@ -43,7 +42,7 @@ class TestMainSanitization(unittest.TestCase):
     def test_malicious_input_blocked_by_heuristic(self, mock_rag_chain, mock_guardrail_check, 
                                                    mock_sanitize_text, mock_is_malicious, 
                                                    mock_audit_store, mock_conv_store, mock_file_open,
-                                                   mock_chat_openai, mock_get_embedding_provider, 
+                                                   mock_get_embedding_provider, 
                                                    mock_graph_database, mock_get_redis_client):
         """Test that malicious input is blocked by heuristic check before reaching guardrail."""
         
@@ -96,7 +95,7 @@ class TestMainSanitization(unittest.TestCase):
     def test_input_blocked_by_guardrail(self, mock_rag_chain, mock_guardrail_check, 
                                         mock_sanitize_text, mock_is_malicious, 
                                         mock_audit_store, mock_conv_store, mock_file_open,
-                                        mock_chat_openai, mock_get_embedding_provider, 
+                                        mock_get_embedding_provider, 
                                         mock_graph_database, mock_get_redis_client):
         """Test that input passing heuristic check is blocked by LLM guardrail."""
         
@@ -145,7 +144,7 @@ class TestMainSanitization(unittest.TestCase):
     def test_legitimate_input_passes_all_checks(self, mock_rag_chain, mock_guardrail_check, 
                                                  mock_sanitize_text, mock_is_malicious, 
                                                  mock_audit_store, mock_conv_store, mock_file_open,
-                                                 mock_chat_openai, mock_get_embedding_provider, 
+                                                 mock_get_embedding_provider, 
                                                  mock_graph_database, mock_get_redis_client):
         """Test that legitimate input passes all checks and reaches RAG chain."""
         
@@ -204,7 +203,7 @@ class TestMainSanitization(unittest.TestCase):
     def test_empty_question_returns_400(self, mock_rag_chain, mock_guardrail_check, 
                                         mock_sanitize_text, mock_is_malicious, 
                                         mock_audit_store, mock_conv_store, mock_file_open,
-                                        mock_chat_openai, mock_get_embedding_provider, 
+                                        mock_get_embedding_provider, 
                                         mock_graph_database, mock_get_redis_client):
         """Test that empty question returns 400 before any processing."""
         

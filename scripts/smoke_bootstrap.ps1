@@ -3,7 +3,7 @@
 # Sets APP_MODE=admin, boots server, hits /admin/schema/refresh, checks indexes
 
 param(
-    [string]$ServerUrl = "http://localhost:8000",
+    [string]$ServerUrl = "http://localhost:8002",
     [string]$AdminToken = $env:ADMIN_REFRESH_TOKEN,
     [int]$Timeout = 30
 )
@@ -54,7 +54,8 @@ function Start-Server {
     $env:DEV_MODE = "true"
     
     # Start server in background
-    $process = Start-Process -FilePath "python" -ArgumentList "main.py" -PassThru -WindowStyle Hidden
+    $process = Start-Process -FilePath "python" `
+           -ArgumentList "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000" ` -PassThru -WindowStyle Hidden
     
     # Wait for server to start
     Write-Status "INFO" "Waiting for server to start (timeout: ${Timeout}s)..."

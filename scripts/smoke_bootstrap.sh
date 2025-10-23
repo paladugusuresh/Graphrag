@@ -9,11 +9,11 @@ echo "🚀 Starting smoke test: Admin Bootstrap"
 echo "========================================"
 
 # Configuration
-SERVER_URL="http://localhost:8000"
+SERVER_URL="http://127.0.0.1:8002"
 ADMIN_TOKEN="${ADMIN_REFRESH_TOKEN:-}"
 SCHEMA_REFRESH_URL="${SERVER_URL}/admin/schema/refresh"
 HEALTH_URL="${SERVER_URL}/health"
-TIMEOUT=30
+TIMEOUT=200
 
 # Colors for output
 RED='\033[0;31m'
@@ -59,7 +59,7 @@ start_server() {
     export DEV_MODE=true
     
     # Start server in background
-    python main.py &
+    python -m uvicorn main:app --host 0.0.0.0 --port 8002 &
     SERVER_PID=$!
     
     # Wait for server to start

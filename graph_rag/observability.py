@@ -34,11 +34,133 @@ db_query_failed = Counter("db_query_failed", "Number of failed database queries.
 db_query_latency = Histogram("db_query_latency_seconds", "Latency of database queries.", buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0, float('inf')))
 inflight_queries = Gauge("inflight_queries", "Number of currently inflight database queries.")
 llm_calls_total = Counter("llm_calls_total", "Total number of LLM calls.")
+embedding_match_score = Histogram("embedding_match_score", "Schema embedding similarity scores", buckets=(0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0))
+cypher_validation_failures = Counter("cypher_validation_failures", "Cypher validation failures")
+
+# Domain-specific Pipeline Metrics
+planner_latency_seconds = Histogram(
+    "planner_latency_seconds", 
+    "Latency of query planning operations", 
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, float('inf'))
+)
+
+mapping_similarity = Histogram(
+    "mapping_similarity", 
+    "Semantic mapping similarity scores", 
+    buckets=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+)
+
+executor_latency_seconds = Histogram(
+    "executor_latency_seconds", 
+    "Latency of query execution operations", 
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, float('inf'))
+)
+
+augmentation_size = Histogram(
+    "augmentation_size", 
+    "Number of augmented results/neighbors", 
+    buckets=(0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, float('inf'))
+)
+
+# Event Counters
+guardrail_blocks_total = Counter(
+    "guardrail_blocks_total", 
+    "Total number of guardrail blocks", 
+    ["reason"]
+)
+
+llm_rate_limited_total = Counter(
+    "llm_rate_limited_total", 
+    "Total number of LLM rate limit hits"
+)
+
+# New metrics for robust guardrail system
+guardrail_validation_errors_total = Counter(
+    "guardrail_validation_errors_total",
+    "Total number of guardrail validation errors",
+    ["error_type", "schema_type"]
+)
+
+guardrail_dev_bypass_total = Counter(
+    "guardrail_dev_bypass_total",
+    "Total number of guardrail dev bypass events",
+    ["bypass_reason"]
+)
+
+llm_json_parse_failures_total = Counter(
+    "llm_json_parse_failures_total",
+    "Total number of LLM JSON parsing failures",
+    ["parser_type", "schema_type"]
+)
+
+llm_retry_attempts_total = Counter(
+    "llm_retry_attempts_total",
+    "Total number of LLM retry attempts",
+    ["attempt_number", "failure_reason"]
+)
 
 def start_metrics_server():
     port = int(os.getenv("PROMETHEUS_PORT", 8000))
     start_http_server(port)
     logging.info(f"Prometheus metrics server started on port {port}")
+
+# Pipeline Span Helpers
+def create_pipeline_span(operation_name: str, **attributes):
+    """
+    Create a pipeline span with standard attributes.
+    
+    Args:
+        operation_name: Name of the pipeline operation
+        **attributes: Additional span attributes
+        
+    Returns:
+        OpenTelemetry span context manager
+    """
+    return tracer.start_as_current_span(operation_name, attributes=attributes)
+
+def add_span_attributes(span, **attributes):
+    """
+    Add attributes to an existing span.
+    
+    Args:
+        span: OpenTelemetry span
+        **attributes: Attributes to add
+    """
+    for key, value in attributes.items():
+        set_span_attr(span, key, value)
+
+def set_span_attr(span, key: str, value):
+    """
+    Safely set a span attribute with type conversion for OpenTelemetry.
+    
+    Handles None values and complex types (dict, list) by converting to JSON.
+    Prevents "Invalid type" warnings from OpenTelemetry.
+    
+    Args:
+        span: OpenTelemetry span
+        key: Attribute key
+        value: Attribute value (any type)
+    """
+    import json
+    
+    # Skip None values
+    if value is None:
+        return
+    
+    # Check if span is still recording
+    if not span.is_recording():
+        return
+    
+    # Handle primitive types (OpenTelemetry accepts these directly)
+    if isinstance(value, (str, int, float, bool, bytes)):
+        span.set_attribute(key, value)
+    else:
+        # Convert complex types (dict, list, etc.) to JSON string
+        try:
+            span.set_attribute(key, json.dumps(value))
+        except (TypeError, ValueError):
+            # If JSON serialization fails, use string representation
+            span.set_attribute(key, str(value))
 
 # Structured Logger
 

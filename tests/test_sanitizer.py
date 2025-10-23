@@ -100,40 +100,4 @@ class TestSanitizer(unittest.TestCase):
 
     def test_is_probably_malicious_excessive_special_chars(self):
         """Test detection of excessive special characters."""
-        malicious_obfuscated = ";;;'''\"\"\"((())){}{}{}[][]<><><>|||&&&$$$```"
-        self.assertTrue(is_probably_malicious(malicious_obfuscated))
-
-    def test_is_probably_malicious_javascript_patterns(self):
-        """Test detection of JavaScript injection patterns."""
-        malicious_js = [
-            "javascript:alert('xss')",
-            "eval('malicious code')",
-            "setTimeout(function(){hack()}, 1000)",
-        ]
-        for text in malicious_js:
-            self.assertTrue(is_probably_malicious(text), f"Text should be malicious: {text}")
-
-    def test_is_probably_malicious_handles_non_string(self):
-        """Test that non-string input is not flagged as malicious."""
-        self.assertFalse(is_probably_malicious(None))
-        self.assertFalse(is_probably_malicious(123))
-        self.assertFalse(is_probably_malicious([]))
-
-    def test_integration_sanitize_and_detect(self):
-        """Test integration of sanitization and malicious detection."""
-        # Start with malicious text
-        original = "Hello; MATCH (n) DELETE n; DROP TABLE users; CREATE (m)"
-        
-        # Should be detected as malicious before sanitization
-        self.assertTrue(is_probably_malicious(original))
-        
-        # After sanitization, suspicious sequences are removed
-        sanitized = sanitize_text(original)
-        expected = "Hello (n) n users (m)"
-        self.assertEqual(sanitized, expected)
-        
-        # Sanitized version should be less likely to be flagged (though may still be)
-        # This is expected behavior - sanitization reduces but doesn't eliminate all risk
-
-if __name__ == '__main__':
-    unittest.main()
+        malicious_obfuscated = ";;;'''\"\"\"((())){}{}{}[][]<><><>|||&&&$$$

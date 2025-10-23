@@ -1,18 +1,28 @@
 # graph_rag/ingest.py
 import os
 import glob
+import yaml
 from langchain.docstore.document import Document
 from langchain.text_splitter import TokenTextSplitter
 from graph_rag.neo4j_client import Neo4jClient
 from graph_rag.embeddings import get_embedding_provider # Import the getter function
 from graph_rag.observability import get_logger
-from graph_rag.schema_catalog import generate_schema_allow_list
+from graph_rag.schema_manager import ensure_schema_loaded
 from graph_rag.llm_client import call_llm_structured, LLMStructuredError
 from graph_rag.config_manager import get_config_value
 from pydantic import BaseModel
-from graph_rag.cypher_generator import CypherGenerator # Import the class, not the instance
+from graph_rag.cypher_generator import validate_label, validate_relationship_type, load_allow_list
+from graph_rag.audit_store import audit_store
+from graph_rag.flags import RETRIEVAL_CHUNK_EMBEDDINGS_ENABLED
 
 logger = get_logger(__name__)
+
+# NOTE: Schema embeddings (SchemaTerm nodes) are managed by schema_manager/schema_embeddings
+# at startup or via the admin endpoint. ingest.py must not create SchemaTerm nodes.
+
+# enforce admin-only execution for writes
+if os.getenv("APP_MODE", "read_only").lower() != "admin" and os.getenv("ALLOW_WRITES", "false").lower() not in ("1", "true", "yes"):
+    raise RuntimeError("Ingest must be run with APP_MODE=admin or ALLOW_WRITES=true")
 
 DATA_DIR = "data/"
 CHUNK_SIZE = 512
@@ -22,9 +32,16 @@ class ExtractedNode(BaseModel):
     id: str
     type: str
 
+class ExtractedRelationship(BaseModel):
+    source_id: str
+    target_id: str
+    relationship_type: str
+    source_label: str
+    target_label: str
+
 class ExtractedGraph(BaseModel):
     nodes: list[ExtractedNode] = []
-    relationships: list[dict] = []
+    relationships: list[ExtractedRelationship] = []
 
 def parse_frontmatter(text: str):
     if text.startswith("---"):
@@ -36,8 +53,11 @@ def parse_frontmatter(text: str):
     return {}, text
 
 def process_and_ingest_files():
-    # Generate allow-list first (admin)
-    generate_schema_allow_list()
+    audit_store.record({"event":"ingest.started", "timestamp": __import__("time").time()})
+    logger.info("Ingest started (admin mode).")
+    
+    # Get canonical allow-list (idempotent). ensure_schema_loaded will write allow_list.json and stub in DEV_MODE.
+    allow_list = ensure_schema_loaded(force=True)
 
     text_splitter = TokenTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
     for path in glob.glob(os.path.join(DATA_DIR, "*.md")):
@@ -50,27 +70,168 @@ def process_and_ingest_files():
         doc_id = metadata['id']
         # Create Document
         client = Neo4jClient() # Instantiate Neo4jClient here
-        client.execute_write_query("MERGE (d:Document {id: $id}) SET d += $props", {"id": doc_id, "props": metadata}, timeout=get_config_value('guardrails.neo4j_timeout', 10))
+        try:
+            client.execute_write_query("MERGE (d:Document {id: $id}) SET d += $props", {"id": doc_id, "props": metadata}, timeout=get_config_value('guardrails.neo4j_timeout', 10))
+        except Exception as e:
+            logger.error(f"Failed to create Document {doc_id}: {e}")
+            audit_store.record({"event":"ingest.document_creation_failed", "doc_id": doc_id, "error": str(e)})
+            continue
+        
         doc = Document(page_content=body, metadata=metadata)
         chunks = text_splitter.split_documents([doc])
         for i, chunk in enumerate(chunks):
             chunk_id = f"{doc_id}-chunk-{i}"
-            client.execute_write_query(
-                "MATCH (d:Document {id: $id}) MERGE (c:Chunk {id: $chunk_id}) SET c.text = $text MERGE (d)-[:HAS_CHUNK]->(c)",
-                {"id": doc_id, "chunk_id": chunk_id, "text": chunk.page_content},
-                timeout=get_config_value('guardrails.neo4j_timeout', 10)
-            )
+            try:
+                # Create the chunk first
+                client.execute_write_query(
+                    "MATCH (d:Document {id: $id}) MERGE (c:Chunk {id: $chunk_id}) SET c.text = $text MERGE (d)-[:HAS_CHUNK]->(c)",
+                    {"id": doc_id, "chunk_id": chunk_id, "text": chunk.page_content},
+                    timeout=get_config_value('guardrails.neo4j_timeout', 10)
+                )
+                
+                # Generate and persist chunk embedding if enabled
+                if RETRIEVAL_CHUNK_EMBEDDINGS_ENABLED():
+                    try:
+                        # Get embedding for the chunk content
+                        embedding_provider = get_embedding_provider()
+                        embeddings = embedding_provider.get_embeddings([chunk.page_content])
+                        
+                        if embeddings and len(embeddings) > 0:
+                            embedding_vector = embeddings[0]
+                            
+                            # Update the chunk with the embedding
+                            client.execute_write_query(
+                                "MATCH (c:Chunk {id: $chunk_id}) SET c.embedding = $embedding",
+                                {"chunk_id": chunk_id, "embedding": embedding_vector},
+                                timeout=get_config_value('guardrails.neo4j_timeout', 10)
+                            )
+                            
+                            logger.debug(f"Added embedding to chunk {chunk_id} (dimensions: {len(embedding_vector)})")
+                        else:
+                            logger.warning(f"Failed to generate embedding for chunk {chunk_id}")
+                            audit_store.record({
+                                "event": "ingest.chunk_embedding_failed",
+                                "chunk_id": chunk_id,
+                                "reason": "empty_embedding_result"
+                            })
+                    except Exception as embed_error:
+                        logger.error(f"Failed to generate embedding for chunk {chunk_id}: {embed_error}")
+                        audit_store.record({
+                            "event": "ingest.chunk_embedding_failed",
+                            "chunk_id": chunk_id,
+                            "error": str(embed_error)
+                        })
+                        # Continue processing - embedding failure shouldn't stop ingestion
+                
+            except Exception as e:
+                logger.error(f"Failed to create Chunk {chunk_id}: {e}")
+                audit_store.record({"event":"ingest.chunk_creation_failed", "chunk_id": chunk_id, "doc_id": doc_id, "error": str(e)})
+                continue
             # Ask LLM to extract graph for chunk - MUST be structured
             prompt = f"Extract nodes and relationships as JSON for the text:\n\n{chunk.page_content[:1000]}"
             try:
                 # In production, schema_model would be a Pydantic model; here we just call raw for dev
                 g = call_llm_structured(prompt, ExtractedGraph)
                 # ingest nodes safely: validate label against allow-list via cypher_generator
-                local_cypher_generator = CypherGenerator() # Instantiate CypherGenerator locally
                 for node in g.nodes:
-                    validated_label = local_cypher_generator.validate_label(node.type)
-                    client.execute_write_query(f"MERGE (n:{validated_label} {{id: $id}})", {"id": node.id}, timeout=get_config_value('guardrails.neo4j_timeout', 10))
-                    client.execute_write_query("MATCH (c:Chunk {id:$cid}) MATCH (e {id:$eid}) MERGE (c)-[:MENTIONS]->(e)", {"cid": chunk_id, "eid": node.id}, timeout=get_config_value('guardrails.neo4j_timeout', 10))
+                    try:
+                        validated_label = validate_label(node.type, allow_list)
+                        client.execute_write_query(f"MERGE (n:{validated_label} {{id: $id}})", {"id": node.id}, timeout=get_config_value('guardrails.neo4j_timeout', 10))
+                        
+                        # Create MENTIONS relationship with label-qualified entity matching
+                        try:
+                            # Validate MENTIONS relationship type
+                            validate_relationship_type("MENTIONS", allow_list)
+                            
+                            # Use label-qualified matching for safer edge creation
+                            client.execute_write_query(
+                                f"MATCH (c:Chunk {{id: $cid}}) MATCH (e:{validated_label} {{id: $eid}}) MERGE (c)-[:MENTIONS]->(e)",
+                                {"cid": chunk_id, "eid": node.id},
+                                timeout=get_config_value('guardrails.neo4j_timeout', 10)
+                            )
+                            
+                            # Audit successful relationship creation
+                            audit_store.record({
+                                "event": "ingest.relationship_created",
+                                "chunk_id": chunk_id,
+                                "entity_id": node.id,
+                                "entity_label": validated_label,
+                                "relationship_type": "MENTIONS",
+                                "status": "success"
+                            })
+                            
+                        except Exception as rel_error:
+                            logger.error(f"MENTIONS relationship creation failed for node {node.id} in chunk {chunk_id}: {rel_error}")
+                            audit_store.record({
+                                "event": "ingest.relationship_creation_failed",
+                                "chunk_id": chunk_id,
+                                "node_id": node.id,
+                                "relationship_type": "MENTIONS",
+                                "error": str(rel_error),
+                                "reason": "relationship_validation_failed"
+                            })
+                            # Continue with next node - relationship failure shouldn't stop node creation
+                            
+                    except Exception as db_error:
+                        logger.error(f"DB write failed for node {node.id} in chunk {chunk_id}: {db_error}")
+                        audit_store.record({"event":"ingest.db_write_failed", "chunk_id": chunk_id, "node_id": node.id, "error": str(db_error)})
+                        # Continue with next node
+                        continue
+                
+                # Process LLM-returned relationships with validation
+                for rel in g.relationships:
+                    try:
+                        # Validate source and target labels
+                        validated_source_label = validate_label(rel.source_label, allow_list)
+                        validated_target_label = validate_label(rel.target_label, allow_list)
+                        
+                        # Validate relationship type
+                        validated_rel_type = validate_relationship_type(rel.relationship_type, allow_list)
+                        
+                        # Create the relationship with label-qualified matching
+                        client.execute_write_query(
+                            f"MATCH (src:{validated_source_label} {{id: $src_id}}) MATCH (tgt:{validated_target_label} {{id: $tgt_id}}) MERGE (src)-[:{validated_rel_type}]->(tgt)",
+                            {"src_id": rel.source_id, "tgt_id": rel.target_id},
+                            timeout=get_config_value('guardrails.neo4j_timeout', 10)
+                        )
+                        
+                        # Audit successful relationship creation
+                        audit_store.record({
+                            "event": "ingest.relationship_created",
+                            "chunk_id": chunk_id,
+                            "source_id": rel.source_id,
+                            "target_id": rel.target_id,
+                            "source_label": validated_source_label,
+                            "target_label": validated_target_label,
+                            "relationship_type": validated_rel_type,
+                            "status": "success"
+                        })
+                        
+                    except Exception as rel_error:
+                        logger.error(f"LLM relationship creation failed for {rel.source_id}-[{rel.relationship_type}]->{rel.target_id} in chunk {chunk_id}: {rel_error}")
+                        audit_store.record({
+                            "event": "ingest.relationship_creation_failed",
+                            "chunk_id": chunk_id,
+                            "source_id": rel.source_id,
+                            "target_id": rel.target_id,
+                            "source_label": rel.source_label,
+                            "target_label": rel.target_label,
+                            "relationship_type": rel.relationship_type,
+                            "error": str(rel_error),
+                            "reason": "llm_relationship_validation_failed"
+                        })
+                        # Continue with next relationship
+                        continue
             except LLMStructuredError as e:
                 logger.error(f"LLM extraction failed for chunk {chunk_id}: {e}")
-                # create human review record, skip for now
+                audit_store.record({"event":"ingest.llm_extraction_failed", "chunk_id": chunk_id, "error": str(e)})
+                # Continue with next chunk
+                continue
+            except Exception as e:
+                logger.exception(f"Unexpected ingest error for chunk {chunk_id}: {e}")
+                audit_store.record({"event":"ingest.chunk_failed", "chunk_id": chunk_id, "error": str(e)})
+                # Continue with next chunk
+                continue
+    
+    audit_store.record({"event":"ingest.completed", "timestamp": __import__("time").time()})
+    logger.info("Ingest completed.")
