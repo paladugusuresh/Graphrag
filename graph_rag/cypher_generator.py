@@ -268,77 +268,75 @@ def generate_cypher_with_llm(intent: str, params: dict, question: str) -> str:
     schema_hints = build_schema_hints(max_items_per_category=50)
     
     # Create a structured prompt that enforces parameterization with live schema
-    prompt = f"""You are a Cypher query generator for a Student Support graph database. Generate a safe, parameterized Cypher query using ONLY the allowed schema elements below.
+    prompt = f"""You are a Cypher query generator for a Student Support graph database. Generate a safe, parameterized Cypher query using ONLY the allowed schema elements listed below.
 
 QUESTION: {question}
 INTENT: {intent}
 PARAMETERS AVAILABLE: {params}
 
-====== LIVE SCHEMA (USE ONLY THESE ELEMENTS) ======
+====== MANDATORY SCHEMA CONSTRAINTS (USE ONLY THESE - NO EXCEPTIONS) ======
 {schema_hints}
 ====== END OF SCHEMA ======
 
-CRITICAL SAFETY REQUIREMENTS (NON-NEGOTIABLE):
+⚠️ ABSOLUTE REQUIREMENTS - VIOLATION = QUERY REJECTION ⚠️
 
-1. READ-ONLY OPERATIONS ONLY:
+1. SCHEMA ADHERENCE (STRICTEST PRIORITY):
+   
+   MUST ONLY USE LABELS FROM THE LIST ABOVE:
+   - You MUST use ONLY the node labels listed in "ALLOWED NODE LABELS" above
+   - DO NOT invent, guess, or use ANY label not explicitly listed
+   - If a label you want is not in the list, pick the closest allowed label or omit it
+   - Example: If only "Student" exists, NEVER use "Person" or "User"
+   
+   MUST ONLY USE RELATIONSHIPS FROM THE LIST ABOVE:
+   - You MUST use ONLY the relationship types listed in "ALLOWED RELATIONSHIPS" above
+   - DO NOT invent, guess, or use ANY relationship not explicitly listed
+   - If a relationship you want is not in the list, pick the closest allowed one or use a simpler query
+   
+   MUST ONLY USE PROPERTIES FROM THE LIST ABOVE:
+   - For each label, you MUST use ONLY the properties listed for that label in "ALLOWED PROPERTIES" above
+   - DO NOT reference ANY property not explicitly listed for that label
+   - If the user asks for a property not in the list (e.g., "title" when only "goalType" exists), either:
+     a) Use the closest allowed property (e.g., use "goalType" instead of "title")
+     b) Omit that property from the query entirely
+   - Example: For "Goal" label, if allowed properties are [goalType, id, description], 
+              you MUST NOT use g.title, g.status, or any other property
+   
+2. READ-ONLY OPERATIONS ONLY:
    ✅ ALLOWED: MATCH, OPTIONAL MATCH, RETURN, WHERE, ORDER BY, LIMIT, WITH, UNWIND, CASE, COALESCE
    ❌ FORBIDDEN: CREATE, MERGE, SET, DELETE, REMOVE, DROP, CALL, LOAD CSV, FOREACH, INDEX, CONSTRAINT, apoc.*, dbms.*
 
-2. MANDATORY PARAMETERIZATION:
-   ✅ ALL user data MUST use parameter placeholders ($param) - NEVER string literals
+3. MANDATORY PARAMETERIZATION (NO STRING LITERALS FOR USER DATA):
+   ✅ ALL user input data MUST use parameter placeholders ($param) - NEVER string literals
    ✅ Example: WHERE toLower(s.fullName) = toLower($student_name)
    ❌ NEVER: WHERE s.fullName = 'John Doe' or WHERE s.fullName = "{params.get('student_name')}"
+   ❌ NEVER: Any hardcoded user data in quotes
 
-3. MANDATORY LIMIT CLAUSE:
-   ✅ EVERY query MUST end with LIMIT $limit
-   ✅ Use the provided $limit parameter from params
+4. MANDATORY LIMIT CLAUSE:
+   ✅ EVERY query MUST end with: LIMIT $limit
+   ✅ MUST use the $limit parameter (not a hardcoded number)
    ❌ NEVER: LIMIT 20 or LIMIT 100 (hardcoded limits)
-
-4. CONSERVATIVE SCHEMA ADHERENCE:
-   ✅ Use ONLY labels, relationships, and properties from the schema above
-   ✅ When uncertain, use the most conservative valid query
-   ✅ Prefer direct matches over complex traversals
-   ❌ NEVER guess or invent new labels/relationships/properties
 
 5. SAFE NAME-MATCHING PATTERNS (REQUIRED for person queries):
    ✅ ALWAYS use case-insensitive comparison with toLower() for person names
    ✅ Pattern: WHERE toLower(p.fullName) = toLower($person_name) OR toLower(p.name) = toLower($person_name)
-   ✅ Alternative: WITH toLower($person_name) AS q MATCH (p:PersonLabel) WHERE toLower(p.fullName) = q
-   ❌ NEVER: WHERE p.fullName = $person_name (case-sensitive)
+   ❌ NEVER: WHERE p.fullName = $person_name (case-sensitive - will fail on "John" vs "john")
 
-PARAMETERIZATION EXAMPLES:
-✅ CORRECT: WHERE toLower(s.fullName) = toLower($student_name)
-✅ CORRECT: WHERE toLower(s.fullName) = toLower($student_name) OR toLower(s.name) = toLower($student_name)
-✅ CORRECT: WITH toLower($student_name) AS q MATCH (s:Student) WHERE toLower(s.fullName) = q
-✅ CORRECT: LIMIT $limit
-❌ WRONG: WHERE s.fullName = 'John Doe'
-❌ WRONG: WHERE s.fullName = $student_name (missing toLower)
-❌ WRONG: LIMIT 20
+CRITICAL REMINDERS:
+• The schema list above is EXHAUSTIVE - it contains ALL allowed elements
+• DO NOT be creative - use ONLY what is explicitly listed
+• When in doubt, use simpler queries with fewer elements rather than guessing
+• Prefer omitting a property over inventing one not in the schema
+• Use COALESCE(property, '') for optional properties to handle nulls safely
 
-CONSERVATIVE SCHEMA ADHERENCE RULES:
-- NEVER guess or invent new labels, relationships, or properties
-- If uncertain about schema elements, use ONLY the most basic valid query
-- Prefer returning directly matched nodes over complex relationship traversals
-- When in doubt, use broader matches (e.g., all Students) rather than invalid syntax
-- If a specific property doesn't exist in schema, omit it rather than guessing
-- Use COALESCE() for optional properties to handle null values safely
-- Stick to simple patterns: MATCH (n:Label) WHERE condition RETURN n.property LIMIT $limit
-
-SAFE FALLBACK PATTERNS:
-✅ When uncertain about relationships: MATCH (n:Student) RETURN n.fullName LIMIT $limit
-✅ When uncertain about properties: MATCH (n:Student) RETURN n.fullName, coalesce(n.status, '') AS status LIMIT $limit
-✅ When uncertain about complex queries: Use simple direct matches only
-❌ NEVER: Inventing new labels like :Person when only :Student exists
-❌ NEVER: Using properties not in schema like n.title when only n.fullName exists
-
-EXAMPLE VALID QUERY WITH ALL SAFETY REQUIREMENTS:
+VALID QUERY PATTERN (follows all rules):
 MATCH (s:Student)-[:HAS_PLAN]->(:Plan)-[:HAS_GOAL]->(g:Goal)
-WHERE toLower(s.fullName) = toLower($student_name) OR toLower(s.name) = toLower($student_name)
-RETURN g.title AS goal, coalesce(g.status, '') AS status
-ORDER BY g.title
+WHERE toLower(s.fullName) = toLower($student_name)
+RETURN coalesce(g.goalType, '') AS goal_type, coalesce(g.description, '') AS description
+ORDER BY g.goalType
 LIMIT $limit
 
-Generate the Cypher query now (MUST pass all safety requirements above):"""
+Generate the Cypher query now. It MUST use ONLY the schema elements listed above, MUST use parameters (no string literals), and MUST end with LIMIT $limit:"""
 
     try:
         # Use a simple response model for Cypher generation
