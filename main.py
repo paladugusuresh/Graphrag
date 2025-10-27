@@ -142,7 +142,7 @@ async def chat(req: ChatRequest):
         logger.warning(f"Malicious input blocked by heuristic: {original_question[:100]}...")
         raise HTTPException(403, "Input flagged for manual review")
 
-    # # Run LLM guardrail check on sanitized input
+    # Run heuristic guardrail check on sanitized input
     if not guardrail_check(req.question):
         # Record audit entry for guardrail block
         audit_store.record({
@@ -151,9 +151,9 @@ async def chat(req: ChatRequest):
             "sanitized_question": req.question,
             "timestamp": str(uuid.uuid4()),
             "action": "blocked_403",
-            "check_type": "llm_guardrail"
+            "check_type": "heuristic_guardrail"
         })
-        logger.warning(f"Input blocked by LLM guardrail: {original_question[:100]}...")
+        logger.warning(f"Input blocked by heuristic guardrail: {original_question[:100]}...")
         raise HTTPException(403, "Input flagged for manual review")
 
     conv_id = req.conversation_id if req.conversation_id else str(uuid.uuid4())
