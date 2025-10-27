@@ -114,11 +114,16 @@ def is_probably_malicious(text: str) -> bool:
     
     text_upper = text.upper()
     
+    # Check for dangerous write operations (should be blocked even if alone)
+    dangerous_write_keywords = {'CREATE', 'DELETE', 'MERGE', 'DROP', 'REMOVE', 'DETACH DELETE'}
+    if any(keyword in text_upper for keyword in dangerous_write_keywords):
+        return True
+    
     # Count Cypher keywords
     cypher_keyword_count = sum(1 for keyword in CYPHER_KEYWORDS if keyword in text_upper)
     
     # Check for multiple Cypher keywords (likely injection attempt)
-    if cypher_keyword_count >= 3:
+    if cypher_keyword_count >= 2:
         return True
     
     # Check for shell command patterns
@@ -139,7 +144,7 @@ def is_probably_malicious(text: str) -> bool:
     # Check for suspicious character sequences
     suspicious_patterns = [
         r'[;\'"]\s*[;\'"]\s*[;\'"]',  # Multiple quotes/semicolons
-        r'\b\d+\s*=\s*\d+\b',        # Numeric equality (SQL injection)
+        r"'\s*\d+\s*'\s*=\s*'\s*\d+\s*'",  # Quoted numeric equality (SQL injection like '1'='1')
         r'<\s*script',                # Script tags
         r'javascript\s*:',            # JavaScript protocol
         r'\beval\s*\(',               # eval function
