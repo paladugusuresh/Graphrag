@@ -9,6 +9,9 @@ from graph_rag.config_manager import get_config, get_config_value
 
 logger = get_logger(__name__)
 
+# Centralized index name constant
+SCHEMA_INDEX_NAME = "schema_embeddings"
+
 def collect_schema_terms() -> List[Dict[str, Any]]:
     """
     Extract schema terms from allow_list.json and optionally from schema_synonyms.json.
@@ -145,6 +148,53 @@ def generate_schema_embeddings() -> List[Dict[str, Any]]:
     logger.info(f"Generated schema embeddings for {len(result)} terms")
     return result
 
+def recreate_schema_vector_index(neo4j_client: Neo4jClient, embedding_dim: int, similarity: str = 'cosine', timeout: int = 10) -> None:
+    """
+    Drop and recreate the SchemaTerm vector index with the specified dimension.
+    
+    This ensures that when embedding providers change (e.g., mock 8-dim -> Gemini 768-dim),
+    the vector index is rebuilt with the correct dimension to match the new embeddings.
+    
+    Args:
+        neo4j_client: Neo4j client instance
+        embedding_dim: Dimension of the embedding vectors (e.g., 768 for Gemini)
+        similarity: Similarity function ('cosine', 'euclidean', or 'l2')
+        timeout: Query timeout in seconds
+    """
+    try:
+        # Step 1: Drop existing index unconditionally
+        drop_query = f"DROP INDEX `{SCHEMA_INDEX_NAME}` IF EXISTS"
+        neo4j_client.execute_write_query(
+            drop_query,
+            {},
+            timeout=timeout,
+            query_name="drop_schema_vector_index"
+        )
+        logger.info(f"Dropped existing vector index '{SCHEMA_INDEX_NAME}' (if it existed)")
+        
+        # Step 2: Create new index with current embedding dimension
+        create_query = f"""
+        CREATE VECTOR INDEX `{SCHEMA_INDEX_NAME}`
+        FOR (s:SchemaTerm) ON (s.embedding)
+        OPTIONS {{
+            indexConfig: {{
+                `vector.dimensions`: {embedding_dim},
+                `vector.similarity_function`: '{similarity}'
+            }}
+        }}
+        """
+        neo4j_client.execute_write_query(
+            create_query,
+            {},
+            timeout=timeout,
+            query_name="create_schema_vector_index"
+        )
+        logger.info(f"Created vector index '{SCHEMA_INDEX_NAME}' with dimension={embedding_dim}, similarity={similarity}")
+        
+    except Exception as e:
+        logger.error(f"Failed to recreate vector index '{SCHEMA_INDEX_NAME}': {e}")
+        raise
+
 def upsert_schema_embeddings() -> Dict[str, Any]:
     """
     Upsert schema embeddings into Neo4j as SchemaTerm nodes and create vector index.
@@ -154,8 +204,6 @@ def upsert_schema_embeddings() -> Dict[str, Any]:
     """
     # Get configuration at runtime
     timeout = get_config_value('guardrails.neo4j_timeout', 10)
-    index_name = get_config_value('schema_embeddings.index_name', 'schema_embeddings')
-    node_label = get_config_value('schema_embeddings.node_label', 'SchemaTerm')
     
     # Generate schema embeddings
     schema_data = generate_schema_embeddings()
@@ -187,16 +235,19 @@ def upsert_schema_embeddings() -> Dict[str, Any]:
             'embedding': term_data['embedding']
         }
         
-        # Parameterized MERGE query
+        # Parameterized MERGE query with ON CREATE and explicit SET for embeddings
+        # The explicit SET ensures embeddings are ALWAYS overwritten, even on match,
+        # preventing mixed dimensions (e.g., old 8-dim vectors mixing with new 768-dim)
         cypher_query = """
         MERGE (s:SchemaTerm {id: $id})
+        ON CREATE SET s.created_at = datetime()
         SET s.term = $term, 
             s.type = $type, 
             s.canonical_id = $canonical_id,
             s.embedding = $embedding,
             s.updated_at = datetime()
         RETURN s.id as id, 
-               CASE WHEN s.created_at IS NULL THEN 'created' ELSE 'updated' END as operation
+               CASE WHEN s.created_at = s.updated_at THEN 'created' ELSE 'updated' END as operation
         """
         
         try:
@@ -220,35 +271,23 @@ def upsert_schema_embeddings() -> Dict[str, Any]:
     
     logger.info(f"Schema term upsert complete: {nodes_created} created, {nodes_updated} updated")
     
-    # Create vector index
+    # Recreate vector index (drop existing and create new with current dimension)
     try:
         # Get embedding dimensions from first embedding
-        embedding_dim = len(schema_data[0]['embedding']) if schema_data else 1536
+        embedding_dim = len(schema_data[0]['embedding']) if schema_data else 768
         
-        # Create vector index with parameterized query
-        index_query = f"""
-        CREATE VECTOR INDEX `{index_name}` IF NOT EXISTS 
-        FOR (s:SchemaTerm) ON (s.embedding) 
-        OPTIONS {{
-            indexConfig: {{
-                `vector.dimensions`: {embedding_dim}, 
-                `vector.similarity_function`: 'cosine'
-            }}
-        }}
-        """
-        
-        neo4j_client.execute_write_query(
-            index_query, 
-            {}, 
-            timeout=timeout,
-            query_name="create_schema_vector_index"
+        # Drop and recreate index to ensure dimension matches current embeddings
+        recreate_schema_vector_index(
+            neo4j_client=neo4j_client,
+            embedding_dim=embedding_dim,
+            similarity='cosine',
+            timeout=timeout
         )
         
-        logger.info(f"Vector index '{index_name}' created/verified with {embedding_dim} dimensions")
-        index_status = "created_or_verified"
+        index_status = "recreated"
         
     except Exception as e:
-        logger.error(f"Failed to create vector index '{index_name}': {e}")
+        logger.error(f"Failed to recreate vector index '{SCHEMA_INDEX_NAME}': {e}")
         index_status = "failed"
     
     return {
@@ -256,7 +295,7 @@ def upsert_schema_embeddings() -> Dict[str, Any]:
         "nodes_created": nodes_created,
         "nodes_updated": nodes_updated,
         "total_terms": len(schema_data),
-        "index_name": index_name,
+        "index_name": SCHEMA_INDEX_NAME,
         "index_status": index_status,
         "embedding_dimensions": embedding_dim
     }
