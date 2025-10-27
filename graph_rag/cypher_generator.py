@@ -361,6 +361,9 @@ Generate the Cypher query now. It MUST use ONLY the schema elements listed above
         # Ensure LIMIT clause is present and parameterized
         cypher_query, params = _ensure_limit_clause(cypher_query, params)
         
+        # Check for proper parameterization (flags suspicious literals)
+        cypher_query, params = _ensure_parameterization(cypher_query, params, intent)
+        
         # Pre-validation scrub: enforce allow-list before validation
         cypher_query, was_repaired = _scrub_and_repair_cypher(cypher_query, intent)
         
@@ -399,7 +402,7 @@ Generate the Cypher query now. It MUST use ONLY the schema elements listed above
 def _ensure_limit_clause(cypher: str, params: dict) -> tuple[str, dict]:
     """
     Ensure that the Cypher query has a LIMIT $limit clause.
-    If missing, automatically append it and add the limit parameter.
+    If missing, automatically append it. If present with hardcoded integer, replace with $limit.
     
     Args:
         cypher: Generated Cypher query
@@ -409,31 +412,80 @@ def _ensure_limit_clause(cypher: str, params: dict) -> tuple[str, dict]:
         Tuple of (modified_cypher, updated_params)
     """
     cypher_upper = cypher.upper()
-    
-    # Check if LIMIT is already present
-    if 'LIMIT' in cypher_upper:
-        # Check if it's using $limit parameter
-        if '$limit' in cypher:
-            return cypher, params
-        else:
-            # Replace hardcoded LIMIT with $limit parameter
-            limit_pattern = r'LIMIT\s+\d+'
-            modified_cypher = re.sub(limit_pattern, 'LIMIT $limit', cypher, flags=re.IGNORECASE)
-            return modified_cypher, params
-    
-    # No LIMIT clause found - append it
     default_limit = get_config_value('cypher.default_limit', 20)
     
-    # Ensure params has limit
+    # Ensure params dict has limit parameter
     if 'limit' not in params:
         params = params.copy()
         params['limit'] = default_limit
     
-    # Append LIMIT clause
-    modified_cypher = cypher.rstrip() + f"\nLIMIT $limit"
+    # Check if LIMIT is already present
+    if 'LIMIT' in cypher_upper:
+        # Check if it's using $limit parameter
+        if '$limit' in cypher.lower():
+            # Already using parameterized LIMIT - good!
+            return cypher, params
+        else:
+            # Has LIMIT but not parameterized - replace hardcoded value with $limit
+            limit_pattern = r'LIMIT\s+\d+'
+            modified_cypher = re.sub(limit_pattern, 'LIMIT $limit', cypher, flags=re.IGNORECASE)
+            logger.debug(f"Replaced hardcoded LIMIT with LIMIT $limit")
+            return modified_cypher, params
     
+    # No LIMIT clause found - append it
+    modified_cypher = cypher.rstrip() + f"\nLIMIT $limit"
     logger.debug(f"Added LIMIT $limit clause to Cypher query (default: {default_limit})")
     return modified_cypher, params
+
+
+def _ensure_parameterization(cypher: str, params: dict, intent: str) -> tuple[str, dict]:
+    """
+    Ensure all user data in the Cypher query uses parameters (no string literals).
+    
+    This function detects string literals that look like user data and flags them.
+    It does NOT automatically fix them because we can't reliably determine which
+    parameter they should map to - this is left to validation to catch.
+    
+    Args:
+        cypher: Generated Cypher query
+        params: Parameters dictionary
+        intent: Intent name for logging
+        
+    Returns:
+        Tuple of (cypher, params) - unchanged if valid, or original if issues found
+        
+    Note:
+        This function performs validation only. Actual parameterization must be
+        done by the LLM. If non-parameterized user data is detected, the validator
+        will catch it and the query will be rejected.
+    """
+    # Detect string literals that might be user data
+    # Allow common safe literals like empty strings, status values, etc.
+    string_literal_pattern = r"['\"]([^'\"]+)['\"]"
+    literals = re.findall(string_literal_pattern, cypher)
+    
+    # Filter out safe literals
+    SAFE_LITERALS = {
+        '', '0', '1', 'true', 'false', 'asc', 'desc', 
+        'ascending', 'descending', 'null', 'NULL', 'active',
+        'completed', 'pending', 'in_progress', 'draft'
+    }
+    
+    suspicious_literals = []
+    for literal in literals:
+        if literal.lower() not in {s.lower() for s in SAFE_LITERALS}:
+            # Check if it looks like user data (contains spaces, capital letters indicating names, etc.)
+            if ' ' in literal or (len(literal) > 3 and literal[0].isupper()):
+                suspicious_literals.append(literal)
+    
+    if suspicious_literals:
+        logger.warning(
+            f"Cypher for intent '{intent}' contains suspicious string literals: {suspicious_literals[:3]}. "
+            "User data should use parameters ($param)."
+        )
+        # Don't modify - let validation catch it with clear error
+    
+    return cypher, params
 
 
 def _scrub_and_repair_cypher(cypher: str, intent: str) -> tuple[str, bool]:
