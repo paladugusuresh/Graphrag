@@ -361,6 +361,12 @@ Generate the Cypher query now. It MUST use ONLY the schema elements listed above
         # Ensure LIMIT clause is present and parameterized
         cypher_query, params = _ensure_limit_clause(cypher_query, params)
         
+        # Pre-validation scrub: enforce allow-list before validation
+        cypher_query, was_repaired = _scrub_and_repair_cypher(cypher_query, intent)
+        
+        if was_repaired:
+            logger.info(f"Cypher was auto-repaired to enforce allow-list for intent: {intent}")
+        
         # Validate the generated Cypher
         if not _validate_generated_cypher(cypher_query, params, intent):
             error_msg = f"LLM generated invalid Cypher for intent: {intent}"
@@ -428,6 +434,167 @@ def _ensure_limit_clause(cypher: str, params: dict) -> tuple[str, dict]:
     
     logger.debug(f"Added LIMIT $limit clause to Cypher query (default: {default_limit})")
     return modified_cypher, params
+
+
+def _scrub_and_repair_cypher(cypher: str, intent: str) -> tuple[str, bool]:
+    """
+    Scrub and repair Cypher query to enforce allow-list constraints.
+    
+    This function examines the query for disallowed labels and properties,
+    and either repairs them (by removing disallowed projections) or flags them
+    for retry with more specific guidance.
+    
+    Args:
+        cypher: The Cypher query to scrub
+        intent: Intent name for logging
+        
+    Returns:
+        Tuple of (repaired_cypher, was_repaired)
+        - repaired_cypher: The scrubbed/repaired query
+        - was_repaired: True if any repairs were made
+        
+    Strategy:
+        1. Parse label and property usages from the query
+        2. Check against allow-list
+        3. For disallowed labels: Cannot repair, return original (validation will catch it)
+        4. For disallowed properties:
+           - In RETURN: Remove the projection or map to closest allowed property
+           - In WHERE/MATCH: Cannot repair safely, return original (validation will catch it)
+    """
+    try:
+        allow_list = load_allow_list()
+        allowed_labels = set(allow_list.get('node_labels', []))
+        allowed_properties = allow_list.get('properties', {})
+        
+        # Track if we made any repairs
+        was_repaired = False
+        repaired_cypher = cypher
+        
+        # Parse label usages: (n:Label) or (n:Label {prop: $param})
+        label_pattern = r'\((\w+):(\w+)(?:\s|{|\))'
+        label_matches = re.findall(label_pattern, cypher)
+        
+        # Check for disallowed labels
+        for var_name, label in label_matches:
+            if label not in allowed_labels:
+                logger.warning(f"Cypher for intent '{intent}' uses disallowed label: {label}")
+                # Cannot safely repair label usage - let validation catch it
+                return cypher, False
+        
+        # Parse property usages: variable.property in RETURN, WHERE, ORDER BY
+        # Pattern: word.word (captures n.fullName, g.title, etc.)
+        property_pattern = r'(\w+)\.(\w+)'
+        property_matches = re.findall(property_pattern, cypher)
+        
+        if not property_matches:
+            return cypher, False
+        
+        # Build a mapping of variable -> label from the query
+        var_to_label = {}
+        for var_name, label in label_matches:
+            var_to_label[var_name] = label
+        
+        # Property mapping: if a disallowed property is found, map to closest allowed one
+        # Common mappings based on semantic similarity
+        PROPERTY_MAPPINGS = {
+            'Goal': {
+                'title': 'goalType',
+                'name': 'goalType',
+                'status': 'description',  # Map status to description as fallback
+            },
+            'Student': {
+                'name': 'fullName',
+                'studentName': 'fullName',
+            },
+            'Staff': {
+                'name': 'fullName',
+                'staffName': 'fullName',
+            }
+        }
+        
+        # Check each property usage
+        disallowed_properties = []
+        for var_name, property_name in property_matches:
+            # Skip if variable is not a node (e.g., it's a function or keyword)
+            if var_name not in var_to_label:
+                continue
+            
+            label = var_to_label[var_name]
+            allowed_props = allowed_properties.get(label, [])
+            
+            if property_name not in allowed_props:
+                disallowed_properties.append((var_name, property_name, label))
+        
+        if not disallowed_properties:
+            return cypher, False
+        
+        # Process disallowed properties
+        for var_name, property_name, label in disallowed_properties:
+            property_ref = f"{var_name}.{property_name}"
+            
+            # Check if property appears in RETURN clause (safe to repair)
+            # Look for RETURN ... property_ref ... pattern
+            return_pattern = rf'RETURN\s+.*?{re.escape(property_ref)}.*?(?:LIMIT|ORDER BY|$)'
+            return_match = re.search(return_pattern, cypher, re.IGNORECASE | re.DOTALL)
+            
+            if return_match:
+                # Property is in RETURN - we can repair it
+                
+                # Try to map to closest allowed property
+                mapped_property = None
+                if label in PROPERTY_MAPPINGS and property_name in PROPERTY_MAPPINGS[label]:
+                    mapped_property = PROPERTY_MAPPINGS[label][property_name]
+                    if mapped_property in allowed_properties.get(label, []):
+                        # Replace with mapped property
+                        repaired_cypher = repaired_cypher.replace(
+                            property_ref,
+                            f"{var_name}.{mapped_property}"
+                        )
+                        was_repaired = True
+                        logger.info(f"Mapped {property_ref} → {var_name}.{mapped_property} for intent '{intent}'")
+                        continue
+                
+                # If no mapping found, try to remove the projection
+                # Find the projection in RETURN clause
+                # Pattern: property_ref AS alias or just property_ref
+                projection_pattern = rf'{re.escape(property_ref)}(?:\s+AS\s+\w+)?(?:\s*,|\s+(?:ORDER BY|LIMIT|$))'
+                projection_match = re.search(projection_pattern, repaired_cypher, re.IGNORECASE)
+                
+                if projection_match:
+                    # Remove the projection
+                    # Handle comma before/after
+                    removal_start = projection_match.start()
+                    removal_end = projection_match.end()
+                    
+                    # Check if there's a comma before this projection
+                    before_text = repaired_cypher[:removal_start]
+                    if before_text.rstrip().endswith(','):
+                        # Remove the comma before
+                        comma_pos = before_text.rstrip().rfind(',')
+                        removal_start = comma_pos
+                    
+                    # Remove the projection
+                    repaired_cypher = repaired_cypher[:removal_start] + repaired_cypher[removal_end:]
+                    was_repaired = True
+                    logger.info(f"Removed disallowed projection {property_ref} from RETURN clause for intent '{intent}'")
+                    continue
+            
+            # Property is in WHERE/MATCH/ORDER BY - cannot safely repair
+            # Let validation catch it
+            logger.warning(f"Cypher for intent '{intent}' uses disallowed property in WHERE/MATCH: {property_ref}")
+            # Don't attempt repair for WHERE/MATCH clauses as it could break query logic
+            return cypher, False
+        
+        # Clean up any double commas or trailing commas in RETURN
+        repaired_cypher = re.sub(r',\s*,', ',', repaired_cypher)  # Replace ,, with ,
+        repaired_cypher = re.sub(r',\s+(LIMIT|ORDER BY)', r' \1', repaired_cypher, flags=re.IGNORECASE)  # Remove trailing commas
+        
+        return repaired_cypher, was_repaired
+        
+    except Exception as e:
+        logger.error(f"Error scrubbing Cypher for intent '{intent}': {e}")
+        # On error, return original query (validation will catch issues)
+        return cypher, False
 
 
 def _validate_generated_cypher(cypher: str, params: dict, intent: str) -> bool:
