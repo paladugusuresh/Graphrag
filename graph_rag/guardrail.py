@@ -30,64 +30,81 @@ def guardrail_check(question: str) -> bool:
     """
     
     with create_pipeline_span("guardrail.check", question=question[:100]) as span:
-        # Get trace ID for audit correlation
         try:
-            current_span = get_current_span()
-            trace_id = f"{current_span.context.trace_id:032x}" if current_span and hasattr(current_span, 'context') and current_span.context.is_valid else "no-trace"
-        except:
-            trace_id = "no-trace"
-        
-        # Run heuristic checks on ORIGINAL input (before sanitization removes suspicious patterns)
-        is_malicious = is_probably_malicious(question)
-        
-        # Sanitize for logging/audit purposes
-        sanitized_question = sanitize_text(question)
-        
-        if is_malicious:
-            # Block suspicious input
-            reason = "heuristic_pattern_match"
-            logger.warning(f"Guardrail blocked suspicious input: {sanitized_question[:100]}...")
+            # Sanitize the input for logging/audit purposes
+            sanitized_question = sanitize_text(question)
             
-            # Increment metrics
-            guardrail_blocks_total.labels(reason=reason).inc()
+            # Compute suspiciousness using heuristics on ORIGINAL input
+            # (before sanitization removes patterns we need to detect)
+            suspicious = is_probably_malicious(question)
+            
+            # Determine allowed status and reason
+            allowed = not suspicious
+            reason = "heuristic_block" if suspicious else "heuristic_allow"
             
             # Add span attributes
             add_span_attributes(span,
-                allowed=False,
+                allowed=allowed,
                 reason=reason,
-                sanitized_question=sanitized_question[:100],
-                check_type="heuristic"
+                sanitized_question=sanitized_question[:100]
             )
             
-            # Audit log the block
+            # Get trace ID for audit correlation
+            try:
+                current_span = get_current_span()
+                trace_id = f"{current_span.context.trace_id:032x}" if current_span and hasattr(current_span, 'context') and current_span.context.is_valid else "no-trace"
+            except:
+                trace_id = "no-trace"
+            
+            if suspicious:
+                # Block suspicious input
+                logger.warning(f"Guardrail blocked suspicious input: {sanitized_question[:100]}...")
+                
+                # Increment metrics
+                guardrail_blocks_total.labels(reason="heuristic_detected").inc()
+                
+                # Audit log the block
+                audit_store.record({
+                    "event": "guardrail_blocked",
+                    "reason": "heuristic_detected",
+                    "question_preview": sanitized_question[:100],
+                    "trace_id": trace_id
+                })
+                
+                return False
+            else:
+                # Allow legitimate input (default behavior)
+                logger.debug(f"Guardrail check passed for: {sanitized_question[:100]}...")
+                
+                # Audit log the pass (optional, for debugging)
+                audit_store.record({
+                    "event": "guardrail_passed",
+                    "reason": "heuristic_allow",
+                    "question_preview": sanitized_question[:100],
+                    "trace_id": trace_id
+                })
+                
+                return True
+                
+        except Exception as e:
+            # Fail-open by default: don't block legitimate traffic on unexpected errors
+            logger.error(f"Unexpected error in guardrail check: {e}")
+            
+            # Try to get trace ID for audit
+            try:
+                current_span = get_current_span()
+                trace_id = f"{current_span.context.trace_id:032x}" if current_span and hasattr(current_span, 'context') and current_span.context.is_valid else "no-trace"
+            except:
+                trace_id = "no-trace"
+            
+            # Audit log the error
             audit_store.record({
-                "event": "guardrail_blocked",
-                "reason": reason,
-                "question_preview": sanitized_question[:100],
-                "trace_id": trace_id,
-                "check_type": "heuristic"
+                "event": "guardrail_error",
+                "reason": "unexpected_error",
+                "error": str(e),
+                "question_preview": question[:100] if isinstance(question, str) else "",
+                "trace_id": trace_id
             })
             
-            return False
-        else:
-            # Allow legitimate input (default behavior)
-            logger.debug(f"Guardrail check passed for: {sanitized_question[:100]}...")
-            
-            # Add span attributes
-            add_span_attributes(span,
-                allowed=True,
-                reason="heuristic_pass",
-                sanitized_question=sanitized_question[:100],
-                check_type="heuristic"
-            )
-            
-            # Audit log the pass (debug level)
-            audit_store.record({
-                "event": "guardrail_passed",
-                "reason": "heuristic_pass",
-                "question_preview": sanitized_question[:100],
-                "trace_id": trace_id,
-                "check_type": "heuristic"
-            })
-            
+            # Fail-open: return True to allow the query through
             return True
