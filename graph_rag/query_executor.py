@@ -46,9 +46,12 @@ def safe_execute(cypher: str, params: Dict[str, Any] = None, timeout: int = None
         RuntimeError: If query execution fails or violates safety constraints
     """
     
-    with create_pipeline_span("executor.safe_execute", 
-                              cypher_preview=cypher[:100], 
-                              timeout_ms=timeout * 1000 if timeout else None) as span:
+    # Build span attributes - only include timeout_ms if timeout is provided
+    span_attrs = {"cypher_preview": cypher[:100]}
+    if timeout:
+        span_attrs["timeout_ms"] = timeout * 1000
+    
+    with create_pipeline_span("executor.safe_execute", **span_attrs) as span:
         with executor_latency_seconds.time():
             if not cypher or not cypher.strip():
                 logger.warning("Empty Cypher query provided for execution")
@@ -123,12 +126,16 @@ def safe_execute(cypher: str, params: Dict[str, Any] = None, timeout: int = None
             result_count = len(results) if results else 0
             logger.info(f"Query executed successfully, returned {result_count} results")
             
-            add_span_attributes(span,
-                result_count=result_count,
-                timeout_ms=execution_timeout * 1000,
-                limit_applied=max_results if 'LIMIT' not in cypher_upper else None,
-                app_mode=app_mode
-            )
+            # Add span attributes - only include limit_applied when we applied one
+            span_attrs = {
+                "result_count": result_count,
+                "timeout_ms": execution_timeout * 1000,
+                "app_mode": app_mode
+            }
+            if 'LIMIT' not in cypher_upper:
+                span_attrs["limit_applied"] = max_results
+            
+            add_span_attributes(span, **span_attrs)
             
             # Record successful execution in audit log
             audit_store.record({
