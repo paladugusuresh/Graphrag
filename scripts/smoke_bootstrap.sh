@@ -56,7 +56,7 @@ start_server() {
     # Set environment variables
     export APP_MODE=admin
     export ALLOW_WRITES=true
-    export DEV_MODE=true
+    export DEV_MODE=false
     
     # Start server in background
     python -m uvicorn main:app --host 0.0.0.0 --port 8002 &
