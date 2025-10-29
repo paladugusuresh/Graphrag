@@ -294,6 +294,17 @@ def call_llm_structured(prompt: str, schema_model: BaseModel, model: str = None,
                 except json.JSONDecodeError as e:
                     json_parse_error = e
             
+            # Post-parse shim: Normalize common field name variations
+            # This handles cases where the LLM returns "query" instead of "cypher"
+            if parsed is not None and isinstance(parsed, dict):
+                if 'query' in parsed and 'cypher' not in parsed:
+                    logger.debug("LLM returned 'query' field, renaming to 'cypher' for schema compatibility")
+                    parsed['cypher'] = parsed.pop('query')
+                # Also handle "parameters" vs "params" variation
+                if 'parameters' in parsed and 'params' not in parsed:
+                    logger.debug("LLM returned 'parameters' field, renaming to 'params' for schema compatibility")
+                    parsed['params'] = parsed.pop('parameters')
+            
             # If parsing failed completely, handle retry or error
             if parsed is None:
                 if attempt < max_retries:

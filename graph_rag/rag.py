@@ -140,13 +140,25 @@ Output:
   "params": {{}}
 }}
 
-**IMPORTANT:** Return ONLY valid JSON matching the required schema. No additional text or explanations.
+**CRITICAL OUTPUT FORMAT - DO NOT DEVIATE:**
 
-**Required JSON Schema:**
+You MUST return a JSON object with EXACTLY these two top-level keys (no more, no less):
+1. "cypher" - a string containing the Cypher query
+2. "params" - an object containing query parameters (can be empty {{}})
+
+**INCORRECT (DO NOT USE):**
 {{
-  "cypher": "string (the Cypher query)",
-  "params": {{}} (object with query parameters)
+  "query": "...",  // ❌ WRONG - use "cypher" not "query"
+  "parameters": {{...}}  // ❌ WRONG - use "params" not "parameters"
 }}
+
+**CORRECT (USE THIS EXACT STRUCTURE):**
+{{
+  "cypher": "MATCH (s:Student) RETURN s LIMIT 10",
+  "params": {{}}
+}}
+
+Return ONLY valid JSON matching this exact schema. No additional text, explanations, or commentary.
 
 Generate the Cypher query now:"""
         
