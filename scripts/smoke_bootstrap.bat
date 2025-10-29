@@ -8,7 +8,7 @@ setlocal enabledelayedexpansion
 echo Starting smoke test: Admin Bootstrap
 echo ========================================
 
-set SERVER_URL=http://localhost:8000
+set SERVER_URL=http://localhost:8002
 set SCHEMA_REFRESH_URL=%SERVER_URL%/admin/schema/refresh
 set HEALTH_URL=%SERVER_URL%/health
 set TIMEOUT=30
@@ -34,7 +34,7 @@ if %errorlevel% equ 0 (
     set DEV_MODE=true
     
     REM Start server in background
-    start /b python main.py
+    start /b python -m uvicorn main:app --host 0.0.0.0 --port 8002
     set SERVER_PID=%!
     
     REM Wait for server to start

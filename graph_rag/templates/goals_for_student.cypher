@@ -1,6 +1,3 @@
-MATCH (s:Student {fullName: $student})
-      -[:HAS_PLAN]->(:Plan)-[:HAS_GOAL]->(g:Goal)
-RETURN coalesce(g.title, g.name, g.goalTitle, '') AS goal,
-       coalesce(g.status, '') AS status
-ORDER BY coalesce(g.title, g.name, g.goalTitle, '')
+MATCH (s:Student {fullName: $student})-[:HAS_PLAN]->(:Plan)-[:HAS_GOAL]->(g:Goal)
+RETURN g.goalType AS goal, g.id AS id, g.name as name
 LIMIT $limit

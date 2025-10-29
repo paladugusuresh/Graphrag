@@ -1,0 +1,22 @@
+{"role": "user", "text": "Which school did alina brooks attend", "trace_id": null, "timestamp": "2025-10-27T04:51:10.939648"}
+{"role": "assistant", "text": "There is no information about the school Alina Brooks attended in the provided data.", "trace_id": "abd76047e7d1804649040e682b94b8c7", "timestamp": "2025-10-27T04:51:15.514262"}
+{"role": "user", "text": "Which primary school did Isabella Thomas go to", "trace_id": null, "timestamp": "2025-10-27T06:00:38.822930"}
+{"role": "assistant", "text": "Isabella Thomas went to Maplewood Elementary.", "trace_id": "67702ef48583c84e3d350d2e8a35fa21", "timestamp": "2025-10-27T06:00:42.726976"}
+{"role": "user", "text": "What is the date of birth of Isabella Thomas", "trace_id": null, "timestamp": "2025-10-27T06:42:50.867146"}
+{"role": "assistant", "text": "Isabella Thomas's date of birth is July 30, 2013.", "trace_id": "79dd8623e9fa3966b3e4324fbf8805bb", "timestamp": "2025-10-27T06:42:55.607450"}
+{"role": "user", "text": "Whom did Ms.Garcia refer", "trace_id": null, "timestamp": "2025-10-27T06:45:22.159808"}
+{"role": "assistant", "text": "There is no information about whom Ms. Garcia referred in the provided data.", "trace_id": "e1c79e1d39bcebc5469e22a8de6e9c60", "timestamp": "2025-10-27T06:45:25.813769"}
+{"role": "user", "text": "Give me the list of students referred by Ms.Garcia, and why are they referred", "trace_id": null, "timestamp": "2025-10-27T06:47:13.054667"}
+{"role": "assistant", "text": null, "trace_id": "7f93966fb478e4af005038e2e755c5f5", "timestamp": "2025-10-27T06:47:16.949371"}
+{"role": "user", "text": "Who is Elijah Brooks", "trace_id": null, "timestamp": "2025-10-28T03:12:24.299872"}
+{"role": "assistant", "text": null, "trace_id": "46eda643888b2ad406e36838e0e79c01", "timestamp": "2025-10-28T03:12:24.347288"}
+{"role": "user", "text": "Who is Elijah Brooks", "trace_id": null, "timestamp": "2025-10-28T03:25:39.525642"}
+{"role": "assistant", "text": null, "trace_id": "8654e3a61d95e5e6b024208987a40caf", "timestamp": "2025-10-28T03:25:39.575457"}
+{"role": "user", "text": "who is isabella thomas", "trace_id": null, "timestamp": "2025-10-28T22:46:08.270582"}
+{"role": "assistant", "text": "Isabella Thomas is a female student with student ID S001237, born on 2013-07-30. She is a former EL student in the 4th grade at Maplewood Elementary. Her primary language is Spanish, and her primary disability is TBD.", "trace_id": "bd397d5f3d0bde860efc6ae13b3faa35", "timestamp": "2025-10-28T22:46:15.124575"}
+{"role": "user", "text": "what are the goals of elijah brooks", "trace_id": null, "timestamp": "2025-10-28T22:46:49.705913"}
+{"role": "assistant", "text": null, "trace_id": "4cb21e955a38995cfb7ede2021beb1c9", "timestamp": "2025-10-28T22:46:49.765719"}
+{"role": "user", "text": "what is the duration of various plans", "trace_id": null, "timestamp": "2025-10-28T22:47:17.590581"}
+{"role": "assistant", "text": null, "trace_id": "0d12f790cbdfc65e479f85b45b2c4afe", "timestamp": "2025-10-28T22:47:21.299305"}
+{"role": "user", "text": "what are the concern areas for elijah brooks", "trace_id": null, "timestamp": "2025-10-28T22:49:48.088579"}
+{"role": "assistant", "text": null, "trace_id": "7b22a6f19520be5d4ab7881527381906", "timestamp": "2025-10-28T22:49:50.794553"}

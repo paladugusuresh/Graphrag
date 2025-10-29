@@ -27,12 +27,8 @@ async def admin_schema_refresh():
     
     This endpoint sequentially executes:
     1. ensure_schema_loaded(force=True) - Refresh schema from Neo4j
-    2. upsert_schema_embeddings() - Generate embeddings, DROP existing vector index,
-       CREATE new index with current embedding dimension, and overwrite all embeddings
+    2. upsert_schema_embeddings() - Generate and store embeddings
     3. ensure_chunk_vector_index() - Ensure chunk vector index exists
-    
-    The vector index is ALWAYS dropped and recreated to ensure dimension matches
-    current embedding provider (e.g., when switching from 8-dim mock to 768-dim Gemini).
     
     No authentication required at this time.
     
@@ -56,13 +52,10 @@ async def admin_schema_refresh():
         ensure_schema_loaded(force=True)
         logger.info("Schema loaded successfully")
         
-        # Step 2: Upsert schema embeddings (includes drop+recreate of vector index)
-        logger.info("Step 2/3: Upserting schema embeddings and recreating vector index...")
-        embedding_result = upsert_schema_embeddings()
-        logger.info(f"Schema embeddings upserted: {embedding_result.get('nodes_created', 0)} created, "
-                   f"{embedding_result.get('nodes_updated', 0)} updated, "
-                   f"index {embedding_result.get('index_status', 'unknown')} with "
-                   f"{embedding_result.get('embedding_dimensions', 0)} dimensions")
+        # Step 2: Upsert schema embeddings
+        logger.info("Step 2/3: Upserting schema embeddings...")
+        upsert_schema_embeddings()
+        logger.info("Schema embeddings upserted successfully")
         
         # Step 3: Ensure chunk vector index exists
         logger.info("Step 3/3: Ensuring chunk vector index...")

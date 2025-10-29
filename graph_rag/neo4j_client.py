@@ -95,7 +95,8 @@ class Neo4jClient:
                 with self._driver.session(default_access_mode=access_mode) as session:
                     if timeout:
                         tx = session.begin_transaction(timeout=timeout)
-                        result = tx.run(query, params)
+                        # Pass params via parameters= keyword
+                        result = tx.run(query, parameters=params)
                         records = [r.data() for r in result]
                         try:
                             tx.commit()
@@ -106,7 +107,8 @@ class Neo4jClient:
                         except Exception:
                             status = "failure"
                     else:
-                        result = session.run(query, params)
+                        # Pass params via parameters= keyword
+                        result = session.run(query, parameters=params)
                         records = [r.data() for r in result]
                         status = "success"
                 duration = perf_counter() - start
@@ -146,7 +148,11 @@ class Neo4jClient:
                 raise RuntimeError("Neo4j driver not initialized")
         
         def _run(tx):
-            result = tx.run(query, **(params or {}), timeout=timeout)
+            # Pass params via parameters= keyword, timeout as separate execution option
+            if timeout is not None:
+                result = tx.run(query, parameters=params, timeout=timeout)
+            else:
+                result = tx.run(query, parameters=params)
             records = result.data()
             
             # Capture and log Neo4j notifications
@@ -243,7 +249,11 @@ class Neo4jClient:
                 raise RuntimeError("Neo4j driver not initialized")
         
         def _run(tx):
-            return tx.run(query, **(params or {}), timeout=timeout).data()
+            # Pass params via parameters= keyword, timeout as separate execution option
+            if timeout is not None:
+                return tx.run(query, parameters=params, timeout=timeout).data()
+            else:
+                return tx.run(query, parameters=params).data()
         
         with self._driver.session() as session:
             return session.execute_write(_run)  # true WRITE transaction

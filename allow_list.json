@@ -1,39 +1,579 @@
 {
   "node_labels": [
-    "Document",
-    "Chunk",
-    "Entity",
-    "__Entity__",
-    "Person",
-    "Organization",
-    "Product",
     "Student",
+    "ConcernArea",
+    "MTSS_Tier",
+    "InterventionPlan",
+    "ProgressMonitoring",
+    "ScreeningResult",
+    "InterventionHistory",
+    "ReferralRecord",
+    "EligibilityRecord",
     "Staff",
-    "Goal",
-    "Plan",
-    "Accommodation",
+    "ReferralTimeline",
+    "IEPDocument",
+    "Plan504Document",
+    "EvaluationRequest",
+    "TestInstrument",
+    "ScoreReport",
+    "ObservationNote",
+    "EligibilityJustification",
     "EvaluationReport",
-    "ConcernArea"
+    "CommunicationLog",
+    "LanguagePreference",
+    "Parent",
+    "ConsentForm",
+    "DigitalSignature",
+    "MeetingNotice",
+    "ServiceProvider",
+    "BillingCode",
+    "IEPGoal",
+    "StudentServiceLog",
+    "ChildFindRecord",
+    "SPEDTimelineMetrics",
+    "ComplianceFlag",
+    "StateReportData",
+    "Goal",
+    "ProgressNote",
+    "StudentService",
+    "ServiceSession",
+    "Plan",
+    "TimelineEvent",
+    "Meeting",
+    "Placement",
+    "TransitionPlan",
+    "IEPAmendment",
+    "PriorWrittenNotice",
+    "AssessmentAdministration",
+    "Accommodation",
+    "Modification",
+    "AssistiveTechnology",
+    "AdultSupport",
+    "Role",
+    "BehaviorInterventionPlan",
+    "LanguageCommunicationPlan",
+    "Agency",
+    "TransitionAssessment",
+    "Attachment",
+    "Document",
+    "SchemaTerm"
   ],
   "relationship_types": [
-    "PART_OF",
-    "HAS_CHUNK",
-    "MENTIONS",
-    "FOUNDED",
-    "HAS_PRODUCT",
-    "HAS_PLAN",
-    "HAS_GOAL",
-    "USES_ACCOMMODATION",
-    "HAS_CASE_MANAGER",
+    "ABOUT_AREA",
+    "ABOUT_REFERRAL",
+    "ABOUT_STUDENT",
+    "AMENDED_BY",
+    "ASSIGNED_CASE_MANAGER",
+    "AUDIT_FLAG",
+    "BELONGS_TO",
+    "BILLING_CODE",
+    "BY_STAFF",
+    "COMMUNICATED",
+    "COMMUNICATED_WITH",
+    "CONDUCTED",
+    "COORDINATES_WITH",
+    "DELIVERED",
+    "DOCUMENTED_BY",
+    "EVALUATOR_ASSIGNED",
+    "FOR_REFERRAL",
     "FOR_STUDENT",
-    "HAS_CONCERN"
+    "HAS_504_PLAN",
+    "HAS_ASSESSMENT",
+    "HAS_ATTACHMENT",
+    "HAS_BIP",
+    "HAS_CASE_MANAGER",
+    "HAS_CHILD_FIND",
+    "HAS_COMMUNICATION",
+    "HAS_CONCERN",
+    "HAS_CONSENT",
+    "HAS_ELIGIBILITY",
+    "HAS_EVALUATOR",
+    "HAS_EVENT",
+    "HAS_FLAG",
+    "HAS_GOAL",
+    "HAS_IEP_DOCUMENT",
+    "HAS_INTERVENTION_PLAN",
+    "HAS_LCP",
+    "HAS_MODIFICATION",
+    "HAS_PLACEMENT",
+    "HAS_PLAN",
+    "HAS_PREVIOUS_INTERVENTION",
+    "HAS_PROGRESS",
+    "HAS_PROGRESS_SCORE",
+    "HAS_REFERRAL",
+    "HAS_ROLE",
+    "HAS_SCREENING_RESULT",
+    "HAS_SERVICE",
+    "HAS_SERVICE_LOG",
+    "HAS_TIER",
+    "HAS_TIMELINE",
+    "HAS_TRANSITION_ASSESSMENT",
+    "HAS_TRANSITION_PLAN",
+    "INVOLVES_PARENT",
+    "LINKED_BATCH",
+    "LINKED_GOAL",
+    "LINKED_TO",
+    "LOGS_SERVICE",
+    "MANAGES",
+    "MEETING_FOR",
+    "OF_TEST",
+    "PARENT_OF",
+    "PARTICIPANT",
+    "PARTICIPATED_IN",
+    "PART_OF_PLAN",
+    "PREFERS_LANGUAGE",
+    "PROVIDED_BY",
+    "RECEIVES_ADULT_SUPPORT",
+    "RECORDED_DURING",
+    "REFERRED",
+    "REFERS_TO",
+    "REGARDING_STUDENT",
+    "RELATED_TO",
+    "RELATES_TO",
+    "SENT_COMMUNICATION",
+    "SIGNED_BY",
+    "STUDENT_REFERS_TO",
+    "TARGETS_GOAL",
+    "TOOK",
+    "TRACKS_TIMELINE",
+    "UPLOADED_BY",
+    "USED_BILLING",
+    "USED_FOR",
+    "USES_ACCOMMODATION",
+    "USES_AT"
   ],
   "properties": {
-    "Student": ["fullName", "name"],
-    "Staff": ["fullName", "role"],
-    "Goal": ["title", "name", "goalTitle", "status"],
-    "Accommodation": ["name"],
-    "EvaluationReport": ["title", "dateTime"],
-    "ConcernArea": ["name"]
+    "TimelineEvent": [
+      "date",
+      "description",
+      "eventId",
+      "eventType"
+    ],
+    "ProgressMonitoring": [
+      "score",
+      "percentile",
+      "level",
+      "assessmentTool",
+      "season",
+      "riskStatus",
+      "growthTarget",
+      "timeOnTask",
+      "tasksCompleted",
+      "stage",
+      "mazeScore",
+      "accuracy",
+      "oralReadingFluency",
+      "status",
+      "conceptsApplicationsScore",
+      "computationScore",
+      "progress"
+    ],
+    "EvaluationReport": [
+      "fileName",
+      "uploadDate",
+      "date",
+      "evaluationType",
+      "reportId",
+      "findings"
+    ],
+    "Staff": [
+      "role",
+      "contact",
+      "staffId",
+      "fullName",
+      "id",
+      "roles",
+      "stakeholderType",
+      "primaryFunction"
+    ],
+    "IEPAmendment": [
+      "id",
+      "date",
+      "sectionsChanged"
+    ],
+    "ChildFindRecord": [
+      "id",
+      "referralDate",
+      "evaluationCompletedDate",
+      "eligibilityDecision"
+    ],
+    "IEPGoal": [
+      "description",
+      "goalID"
+    ],
+    "AssistiveTechnology": [
+      "name"
+    ],
+    "BillingCode": [
+      "id",
+      "description",
+      "medicaidCode",
+      "serviceLabel",
+      "medicaidEligible",
+      "code"
+    ],
+    "Attachment": [
+      "name",
+      "blobId",
+      "addedAt"
+    ],
+    "StudentServiceLog": [
+      "frequency",
+      "duration",
+      "id",
+      "serviceType",
+      "reimbursementStatus",
+      "notes",
+      "serviceDate",
+      "minutesProvided"
+    ],
+    "Document": [
+      "id",
+      "type",
+      "embedding",
+      "text",
+      "source",
+      "node_n_name",
+      "relationship_type",
+      "node_m_name",
+      "node_name",
+      "node_type"
+    ],
+    "ReferralTimeline": [
+      "initialReferralDate",
+      "evaluationDate",
+      "iepMeetingDate",
+      "iepMeetingDateNote",
+      "id",
+      "consentReceived",
+      "evaluationDue",
+      "consentSent"
+    ],
+    "ConsentForm": [
+      "status",
+      "id",
+      "sentDate",
+      "type",
+      "receivedDate",
+      "consentId",
+      "sentAt",
+      "receivedAt",
+      "language",
+      "method",
+      "channel"
+    ],
+    "Goal": [
+      "description",
+      "endDate",
+      "goalType",
+      "id",
+      "legacyGoalId",
+      "measurementTool",
+      "progressStatus",
+      "startDate",
+      "status"
+    ],
+    "Plan504Document": [
+      "accommodations",
+      "implementationStaff",
+      "modifications"
+    ],
+    "Placement": [
+      "endDate",
+      "startDate",
+      "id",
+      "percentGenEd",
+      "settingDescription"
+    ],
+    "ConcernArea": [
+      "academicConcern",
+      "emotionalConcern",
+      "behavioralConcern",
+      "name"
+    ],
+    "CommunicationLog": [
+      "id",
+      "date",
+      "languageUsed",
+      "messageType",
+      "sender",
+      "deliveryStatus",
+      "eventDate",
+      "contactDate",
+      "summary",
+      "method",
+      "contactPerson",
+      "mode",
+      "subject",
+      "logId",
+      "message",
+      "createdAt",
+      "dateTime"
+    ],
+    "BehaviorInterventionPlan": [
+      "id",
+      "strategies",
+      "replacementBehaviors",
+      "reviewCycle",
+      "dummy"
+    ],
+    "StateReportData": [
+      "id",
+      "submissionStatus",
+      "acknowledgmentReceived",
+      "reportingSystem",
+      "reportElement",
+      "batchID",
+      "acknowledgmentReceivedNote"
+    ],
+    "PriorWrittenNotice": [
+      "id",
+      "date"
+    ],
+    "StudentService": [
+      "deliveryMode",
+      "endDate",
+      "startDate",
+      "frequency",
+      "duration",
+      "serviceType",
+      "site",
+      "implementer",
+      "isIndirect",
+      "isESY",
+      "isTransportation",
+      "esyEligible",
+      "transportNeed"
+    ],
+    "Student": [
+      "studentID",
+      "elStatus",
+      "iep504Status",
+      "gender",
+      "school",
+      "grade",
+      "fullName",
+      "dateOfBirth",
+      "primaryLanguage",
+      "primaryDisability",
+      "nextAnnualReviewDate",
+      "nextReevalDate",
+      "surrogateParent",
+      "sasid",
+      "mostRecentAnnualReviewDate",
+      "mostRecentEvaluationDate",
+      "id",
+      "dateOfBirthNote"
+    ],
+    "Role": [
+      "description",
+      "roleID",
+      "Title",
+      "Specialization"
+    ],
+    "MeetingNotice": [
+      "id",
+      "meetingDateTime",
+      "purpose",
+      "participants",
+      "meetingDate",
+      "summary",
+      "meetingType"
+    ],
+    "EligibilityRecord": [
+      "eligibilityType",
+      "meetingDate"
+    ],
+    "EvaluationRequest": [
+      "evalType",
+      "id"
+    ],
+    "EligibilityJustification": [
+      "alignment"
+    ],
+    "ServiceProvider": [
+      "fullName",
+      "npiNumber",
+      "credentials"
+    ],
+    "ComplianceFlag": [
+      "flagType",
+      "auditStatus",
+      "status",
+      "dueDate",
+      "flagId",
+      "id",
+      "type",
+      "createdAt",
+      "daysRemaining",
+      "updatedAt"
+    ],
+    "Modification": [
+      "name"
+    ],
+    "ScoreReport": [
+      "summary",
+      "percentileRank",
+      "standardScore"
+    ],
+    "Parent": [
+      "fullName",
+      "id",
+      "state",
+      "addressLine",
+      "city",
+      "phone",
+      "languagePreference",
+      "contactNumber",
+      "parentId"
+    ],
+    "Meeting": [
+      "date",
+      "meetingType",
+      "meetingId",
+      "reason"
+    ],
+    "AdultSupport": [
+      "name"
+    ],
+    "InterventionPlan": [
+      "strategyDescription",
+      "deliveryMode",
+      "endDate",
+      "interventionName",
+      "sessionDuration",
+      "startDate",
+      "frequency"
+    ],
+    "AssessmentAdministration": [
+      "id",
+      "date"
+    ],
+    "ProgressNote": [
+      "noteText",
+      "noteDate",
+      "enteredBy",
+      "summary",
+      "date",
+      "noteId",
+      "progressPercent"
+    ],
+    "LanguagePreference": [
+      "preferredLanguage",
+      "id",
+      "languageUsed",
+      "language",
+      "code"
+    ],
+    "ServiceSession": [
+      "description",
+      "sessionId",
+      "date",
+      "durationMinutes"
+    ],
+    "MTSS_Tier": [
+      "initialTier",
+      "currentTier",
+      "tierTransitionReason"
+    ],
+    "LanguageCommunicationPlan": [
+      "id",
+      "dummy",
+      "communicationMode",
+      "interpreterNeeded"
+    ],
+    "SchemaTerm": [
+      "id",
+      "type",
+      "embedding",
+      "created_at",
+      "term",
+      "canonical_id",
+      "updated_at"
+    ],
+    "ScreeningResult": [
+      "screenDate",
+      "toolUsed",
+      "benchmarkFlag"
+    ],
+    "SPEDTimelineMetrics": [
+      "evalToEligibilityDays",
+      "totalDays",
+      "referralToEvalDays"
+    ],
+    "TestInstrument": [
+      "id",
+      "instrumentName",
+      "qglobalID"
+    ],
+    "ObservationNote": [
+      "note",
+      "by"
+    ],
+    "Agency": [
+      "name",
+      "id",
+      "lastSeen"
+    ],
+    "ReferralRecord": [
+      "status",
+      "referringStaff",
+      "reason",
+      "createdAt",
+      "referralId",
+      "createdAtRaw",
+      "evalClockStartDate",
+      "evalDueDateSchool",
+      "id",
+      "mtssSummary",
+      "mtssTier"
+    ],
+    "TransitionAssessment": [
+      "id",
+      "date",
+      "dummy",
+      "instrument"
+    ],
+    "DigitalSignature": [
+      "signerID",
+      "verificationStatus",
+      "dateSigned"
+    ],
+    "TransitionPlan": [
+      "id",
+      "courseOfStudy",
+      "anticipatedExit",
+      "transferOfRightsDate",
+      "postsecondaryGoals",
+      "agencyInvolvement",
+      "startDate",
+      "reviewCycle",
+      "focusAreas",
+      "lastSeen"
+    ],
+    "Plan": [
+      "endDate",
+      "startDate",
+      "type",
+      "planId",
+      "goals",
+      "planType"
+    ],
+    "IEPDocument": [
+      "evaluationResults",
+      "accommodations",
+      "services",
+      "goals",
+      "id"
+    ],
+    "InterventionHistory": [
+      "frequency",
+      "duration",
+      "name",
+      "outcome"
+    ],
+    "Accommodation": [
+      "name"
+    ]
   }
 }
