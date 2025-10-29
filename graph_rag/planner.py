@@ -304,7 +304,8 @@ def generate_plan(question: str) -> QueryPlan:
                     # Extract student name for goals_for_student template
                     student_name = _extract_student_name(question)
                     if student_name:
-                        params['student'] = student_name
+                        # Use canonical parameter name 'student_name'
+                        params['student_name'] = student_name
                         params['limit'] = 20  # Default limit
                         anchor_entity = student_name
                         logger.info(f"Extracted student name for goals template: {student_name}")

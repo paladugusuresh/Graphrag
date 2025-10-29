@@ -156,6 +156,9 @@ Generate the Cypher query now:"""
         """
         Build parameters for Cypher template based on plan and template content.
         
+        Uses canonical parameter name 'student_name' internally, but maps to legacy
+        template parameter names (e.g., 'student') for backward compatibility.
+        
         Args:
             plan: Query plan with intent and parameters
             template_cypher: The template Cypher query
@@ -165,17 +168,24 @@ Generate the Cypher query now:"""
         """
         params = {}
         
-        # Extract student name from plan parameters or anchor entity
+        # Extract student name from canonical parameter 'student_name' or fallback to legacy 'student'
         student_name = None
         if plan.params and 'student_name' in plan.params:
             student_name = plan.params['student_name']
         elif plan.params and 'student' in plan.params:
+            # Legacy fallback for backward compatibility
             student_name = plan.params['student']
         elif plan.anchor_entity:
             student_name = plan.anchor_entity
         
+        # Map to template parameter names
+        # Legacy templates use $student, so map from canonical student_name
         if student_name:
-            params['student'] = student_name
+            if '$student' in template_cypher:
+                params['student'] = student_name
+            # Also support new templates that might use $student_name
+            if '$student_name' in template_cypher:
+                params['student_name'] = student_name
         
         # Add default limit if not specified
         if '$limit' in template_cypher and 'limit' not in params:
@@ -273,16 +283,31 @@ Generate the Cypher query now:"""
                         allow_list = get_allow_list()
                         
                         # Try template-based generation first
-                        from graph_rag.cypher_generator import generate_cypher_with_template, generate_cypher_with_llm
+                        from graph_rag.cypher_generator import generate_cypher_with_template, generate_cypher_with_llm, try_load_template
                         
-                        template_cypher = generate_cypher_with_template(plan.intent, plan.params)
+                        # Check if a template exists for this intent
+                        template_cypher_raw = try_load_template(plan.intent)
+                        
+                        if template_cypher_raw:
+                            # Build template parameters (maps canonical student_name to legacy template params)
+                            template_params = self._build_template_params(plan, template_cypher_raw)
+                            
+                            # Validate and generate template Cypher
+                            template_cypher = generate_cypher_with_template(plan.intent, template_params)
+                            
+                            if template_cypher:
+                                # Use template with mapped parameters
+                                cypher_output = CypherGenerationOutput(
+                                    cypher=template_cypher,
+                                    params=template_params
+                                )
+                            else:
+                                # Template validation failed, template_cypher will be None
+                                template_cypher = None
+                        else:
+                            template_cypher = None
                         
                         if template_cypher:
-                            # Use template with validated parameters
-                            cypher_output = CypherGenerationOutput(
-                                cypher=template_cypher,
-                                params=plan.params
-                            )
                             logger.info(f"Template Cypher used for intent '{plan.intent}': {template_cypher[:100]}...")
                             add_span_attributes(cypher_span,
                                 template_used=True,
