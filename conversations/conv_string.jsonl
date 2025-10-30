@@ -20,3 +20,23 @@
 {"role": "assistant", "text": null, "trace_id": "0d12f790cbdfc65e479f85b45b2c4afe", "timestamp": "2025-10-28T22:47:21.299305"}
 {"role": "user", "text": "what are the concern areas for elijah brooks", "trace_id": null, "timestamp": "2025-10-28T22:49:48.088579"}
 {"role": "assistant", "text": null, "trace_id": "7b22a6f19520be5d4ab7881527381906", "timestamp": "2025-10-28T22:49:50.794553"}
+{"role": "user", "text": "What are the goals of elijah brooks", "trace_id": null, "timestamp": "2025-10-29T20:39:49.540005"}
+{"role": "assistant", "text": "Based on the provided data, there are no goals listed for Elijah Brooks.", "trace_id": "eca03a09bfa4556be0eb651496c99dde", "timestamp": "2025-10-29T20:39:52.649385"}
+{"role": "user", "text": "Who is Isabella thomas", "trace_id": null, "timestamp": "2025-10-29T20:48:30.396295"}
+{"role": "assistant", "text": "Isabella Thomas is a former English Learner (EL) student in the 4th grade at Maplewood Elementary. She is female, born on 2013-07-30, and her primary language is Spanish. Her IEP/504 status is 'None', and her primary disability is 'TBD'.", "trace_id": "cb61bcf47f2a126328128c985eb3d086", "timestamp": "2025-10-29T20:48:36.635919"}
+{"role": "user", "text": "Who is Suresh", "trace_id": null, "timestamp": "2025-10-29T20:48:50.021431"}
+{"role": "assistant", "text": "There is no information about Suresh in the provided data.", "trace_id": "cd52b2344148dadc8e4bdec658715107", "timestamp": "2025-10-29T20:48:54.661083"}
+{"role": "user", "text": "What information do you have about special education", "trace_id": null, "timestamp": "2025-10-29T20:50:48.878612"}
+{"role": "assistant", "text": "I do not have any information about special education based on the provided data.", "trace_id": "d3461f1d7f0f0e590fca98e10b9aa873", "timestamp": "2025-10-29T20:50:53.238963"}
+{"role": "user", "text": "What is the primary disability of Samul Joseph", "trace_id": null, "timestamp": "2025-10-29T20:52:34.854496"}
+{"role": "assistant", "text": "The primary disability of Samuel Joseph is currently marked as 'TBD' (To Be Determined).", "trace_id": "54dae46f7de8622b7acbd8c6623277e7", "timestamp": "2025-10-29T20:52:38.565701"}
+{"role": "user", "text": "What are the goals of Elijah Brooks?", "trace_id": null, "timestamp": "2025-10-29T20:57:27.750690"}
+{"role": "assistant", "text": "Based on the provided data, there is no information available regarding the goals of Elijah Brooks.", "trace_id": "f1b2fc1716edf3e4ef679befc1919f70", "timestamp": "2025-10-29T20:57:30.856665"}
+{"role": "user", "text": "What are the goals of Elijah Brooks?", "trace_id": null, "timestamp": "2025-10-29T21:00:13.539062"}
+{"role": "assistant", "text": "Elijah Brooks has goals related to Reading Fluency and Executive Functioning, specifically improving task initiation through the use of checklists and timers. The Executive Functioning goals are part of a 504 Plan.", "trace_id": "6e1f59c21d04e33cc20c2b588ae01449", "timestamp": "2025-10-29T21:00:16.234749"}
+{"role": "user", "text": "Show Elijah\u2019s latest evaluation results", "trace_id": null, "timestamp": "2025-10-29T21:12:02.487929"}
+{"role": "assistant", "text": "There is no evaluation result data available for Elijah.", "trace_id": "73de907f9cf97e712b71064f80193ef8", "timestamp": "2025-10-29T21:12:07.706773"}
+{"role": "user", "text": "Show Elijah Brook\u2019s latest evaluation results", "trace_id": null, "timestamp": "2025-10-29T21:12:31.037244"}
+{"role": "assistant", "text": "There is no evaluation result data available for Elijah Brook.", "trace_id": "0be69bdb898a91183b866efd15e69ec7", "timestamp": "2025-10-29T21:12:35.853133"}
+{"role": "user", "text": "What evaluations has Elijah Brooks had this year?", "trace_id": null, "timestamp": "2025-10-29T21:13:09.567710"}
+{"role": "assistant", "text": "Dr. Monica Geller, an internal evaluator, conducted educational evaluations this year.", "trace_id": "bc05bd1fa8be69599531d95ecbac3f42", "timestamp": "2025-10-29T21:13:14.470394"}
